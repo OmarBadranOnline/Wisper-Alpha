@@ -17,9 +17,3 @@ Integrate reconnaissance tools into a controlled pipeline that:
 - correlates and scores findings,
 - generates report-ready outputs,
 - supports scheduled automation with operational visibility.
-
-## Runtime note
-
-- `wisper.sh` supports dependency verification on Linux environments with `apt-get`.
-- On Windows/Git Bash, Linux-only package installation steps are skipped and the script continues with clear warnings.
-- For full automatic dependency installation, run this part from WSL/Ubuntu.

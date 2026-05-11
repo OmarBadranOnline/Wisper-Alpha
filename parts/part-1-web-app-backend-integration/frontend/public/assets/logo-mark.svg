@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 140" fill="none">
+  
+  <defs>
+    <linearGradient id="sh" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#1B3A5C"></stop>
+      <stop offset="1" stop-color="#0E2542"></stop>
+    </linearGradient>
+  </defs>
+  
+  <path d="M60 6 L108 26 L108 72 C108 104 86 126 60 134 C34 126 12 104 12 72 L12 26 Z" fill="url(#sh)" stroke="#0B1E38" stroke-width="1.5"></path>
+  
+  <g stroke="#4A7BA8" stroke-width="1" opacity="0.55" fill="none">
+    <path d="M60 6 L60 134"></path>
+    <path d="M12 26 L108 26"></path>
+    <path d="M12 72 L108 72"></path>
+    <path d="M12 26 L60 72 L108 26"></path>
+    <path d="M12 72 L60 134 L108 72"></path>
+    <path d="M30 14 L30 90 L60 120"></path>
+    <path d="M90 14 L90 90 L60 120"></path>
+  </g>
+  
+  <text x="60" y="88" font-family="Georgia, serif" font-style="italic" font-size="56" font-weight="400" fill="#E8F4FF" text-anchor="middle">α</text>
+</svg>
