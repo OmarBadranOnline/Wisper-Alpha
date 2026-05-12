@@ -1,6 +1,8 @@
+# IDE / Editor
 .claude/
 .vscode/
 
+# Dependencies
 **/node_modules/
 **/.venv/
 **/.venv-linux/
@@ -9,17 +11,36 @@
 **/__pycache__/
 **/dist/
 
+# Compiled Python
 *.pyc
 *.pyo
 *.pyd
 
+# Databases
 *.db
 *.sqlite
 *.sqlite3
-sessions/
+
+# Secrets — never commit
 .env
 .env.prod
-.gitignore
+.env.local
+*.key
+*.pem
+
+# Recon session output (can be large)
+sessions/
+automation/sessions/
+
+# Archived GUI draft zip
 app_gui_draft.zip
 
-automation/sessions/
+# Archived web GUI (FastAPI + React) — project is now terminal-only
+app/
+
+# Legacy scripts no longer needed for terminal-only flow
+run-unit-tests.sh
+setup-and-start.sh
+
+# Design / internal assets
+App Architecture .jpg
