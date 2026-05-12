@@ -16,5 +16,6 @@
 *.db
 *.sqlite
 *.sqlite3
+sessions/
 
 automation/sessions/

@@ -41,20 +41,46 @@ This runs:
 2. Frontend production build (`npm run build`)
 3. Recon script syntax validation (`bash -n automation/wisper.sh`)
 
+## Optional AI threat analysis in final report
+
+`automation/wisper.sh` can generate an extra AI-assisted threat analysis file during **Step 8: Generate Report**.
+
+1. The script first generates the normal report.
+2. It then asks whether to generate an optional AI analysis.
+3. If no API key is found in an env file, it guides you to create/import one (Gemini free tier link included), then continues.
+
+Supported providers and env keys:
+
+| Provider | API key env var | Default model |
+|---|---|---|
+| Gemini | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | `gemini-1.5-flash` |
+| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-3-5-haiku-latest` |
+| OpenRouter | `OPENROUTER_API_KEY` | `openai/gpt-4o-mini` |
+
+Optional shared config:
+
+- `LLM_PROVIDER` = `gemini` / `openai` / `anthropic` / `openrouter`
+- `LLM_MODEL` = provider model name override
+
+Example `.env`:
+
+```env
+LLM_PROVIDER=gemini
+LLM_MODEL=gemini-1.5-flash
+GEMINI_API_KEY=your_key_here
+```
+
 ## WSL troubleshooting (Windows-mounted repo)
 
 If you run from `/mnt/<drive>/...`, you may hit:
 - `env: 'bash\r': No such file or directory` (CRLF shell files)
 - `Input/output error` while removing `app/backend/.venv` (Windows file locks)
 
-Use:
+Shell scripts are now normalized to LF through `.gitattributes` (`*.sh text eol=lf`).
+If you cloned before that fix, re-clone or run `git add --renormalize .` from the repo root to refresh line endings.
 
-```bash
-powershell.exe -NoProfile -Command "Remove-Item -Recurse -Force 'D:\Study Books\ITNS 410 Pentesting\Project\app\backend\.venv'"
-sed -i 's/\r$//' install-dependencies.sh setup-and-start.sh start.sh run-unit-tests.sh automation/wisper.sh
-chmod +x ./*.sh automation/wisper.sh
-bash ./install-dependencies.sh
-```
+If you still need to clear a locked backend venv on Windows, remove `app/backend/.venv` from PowerShell and rerun setup.
 
 Recommended for best stability: clone and run the project inside native Linux filesystem (e.g., `~/wisper-linux`) instead of `/mnt/d/...`.
 
@@ -65,4 +91,3 @@ Note: project scripts now isolate environments by shell platform (`.venv-linux` 
 - Frontend: `http://localhost:5173`
 - Backend health: `http://localhost:8000/api/v1/health`
 - Backend docs: `http://localhost:8000/api/docs`
-

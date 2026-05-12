@@ -9,6 +9,24 @@ RECON_SCRIPT="${REPO_ROOT}/automation/wisper.sh"
 BACKEND_PID=""
 FRONTEND_PID=""
 
+bootstrap_tool_paths() {
+    local -a candidate_dirs=(
+        "${GOPATH:-${HOME}/go}/bin"
+        "${HOME}/go/bin"
+        "/usr/local/go/bin"
+    )
+
+    for dir in "${candidate_dirs[@]}"; do
+        [[ -d "${dir}" ]] || continue
+        case ":${PATH}:" in
+            *":${dir}:"*) ;;
+            *) export PATH="${dir}:${PATH}" ;;
+        esac
+    done
+}
+
+bootstrap_tool_paths
+
 choose_python() {
     if command -v python3 >/dev/null 2>&1; then
         echo "python3"
