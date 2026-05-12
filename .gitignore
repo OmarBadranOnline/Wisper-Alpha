@@ -17,5 +17,9 @@
 *.sqlite
 *.sqlite3
 sessions/
+.env
+.env.prod
+.gitignore
+app_gui_draft.zip
 
 automation/sessions/
