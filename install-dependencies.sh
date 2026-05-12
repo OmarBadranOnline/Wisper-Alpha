@@ -25,13 +25,26 @@ choose_python() {
     fi
 }
 
+is_linux() {
+    [[ "$(uname -s 2>/dev/null)" == "Linux" ]]
+}
+
 venv_python_path() {
     if [[ -x ".venv/bin/python" ]]; then
         echo ".venv/bin/python"
-    elif [[ -x ".venv/Scripts/python.exe" ]]; then
+    elif ! is_linux && [[ -x ".venv/Scripts/python.exe" ]]; then
         echo ".venv/Scripts/python.exe"
     else
         echo ""
+    fi
+}
+
+run_quick_check() {
+    local cmd="$1"
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 20 bash -lc "${cmd}" >/dev/null 2>&1
+    else
+        bash -lc "${cmd}" >/dev/null 2>&1
     fi
 }
 
@@ -96,6 +109,10 @@ if [[ -z "${PY_CMD}" ]]; then
 else
     step "Installing backend dependencies"
     cd "${BACKEND_DIR}"
+    if is_linux && [[ -d ".venv/Scripts" && ! -x ".venv/bin/python" ]]; then
+        warn "Detected a Windows virtualenv in Linux path. Recreating .venv for Linux."
+        rm -rf .venv
+    fi
     [[ -n "$(venv_python_path)" ]] || "${PY_CMD}" -m venv .venv
     VENV_PY="$(venv_python_path)"
     [[ -n "${VENV_PY}" ]] || { warn "Python virtual environment is unavailable."; add_missing "python-venv"; exit 1; }
@@ -112,9 +129,12 @@ else
             warn "Install SpiderFoot via distro package, Docker, or source if you need advanced aggregation."
         fi
     fi
-    if ! "${VENV_PY}" -m pip install recon-ng; then
-        warn "recon-ng not available from current PyPI index; trying Git source."
-        "${VENV_PY}" -m pip install git+https://github.com/lanmaster53/recon-ng.git || warn "Failed to install recon-ng from Git."
+    if ! command -v recon-ng >/dev/null 2>&1; then
+        install_with_system_manager "recon-ng" || true
+    fi
+    if ! command -v recon-ng >/dev/null 2>&1; then
+        warn "recon-ng is not available from standard pip for this setup."
+        warn "Install recon-ng from your distro package manager or official source if needed."
     fi
 fi
 
@@ -146,7 +166,7 @@ for cmd in \
     "subfinder -version" \
     "amass -version" \
     "waybackurls --help"; do
-    if bash -lc "${cmd}" >/dev/null 2>&1; then
+    if run_quick_check "${cmd}"; then
         ok "${cmd}"
     else
         warn "Failed: ${cmd}"

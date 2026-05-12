@@ -18,10 +18,14 @@ choose_python() {
     fi
 }
 
+is_linux() {
+    [[ "$(uname -s 2>/dev/null)" == "Linux" ]]
+}
+
 venv_python_path() {
     if [[ -x ".venv/bin/python" ]]; then
         echo ".venv/bin/python"
-    elif [[ -x ".venv/Scripts/python.exe" ]]; then
+    elif ! is_linux && [[ -x ".venv/Scripts/python.exe" ]]; then
         echo ".venv/Scripts/python.exe"
     else
         echo ""
@@ -47,6 +51,9 @@ test_backend() {
     py="$(choose_python)"
     [[ -n "${py}" ]] || return 1
     cd "${APP_BACKEND}"
+    if is_linux && [[ -d ".venv/Scripts" && ! -x ".venv/bin/python" ]]; then
+        rm -rf .venv
+    fi
     [[ -n "$(venv_python_path)" ]] || "${py}" -m venv .venv
     venv_py="$(venv_python_path)"
     [[ -n "${venv_py}" ]] || return 1

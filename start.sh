@@ -19,10 +19,14 @@ choose_python() {
     fi
 }
 
+is_linux() {
+    [[ "$(uname -s 2>/dev/null)" == "Linux" ]]
+}
+
 venv_python_path() {
     if [[ -x ".venv/bin/python" ]]; then
         echo ".venv/bin/python"
-    elif [[ -x ".venv/Scripts/python.exe" ]]; then
+    elif ! is_linux && [[ -x ".venv/Scripts/python.exe" ]]; then
         echo ".venv/Scripts/python.exe"
     else
         echo ""
@@ -72,6 +76,9 @@ case "${choice}" in
         echo "Starting backend on http://localhost:8000 ..."
         (
             cd "${BACKEND_PATH}"
+            if is_linux && [[ -d ".venv/Scripts" && ! -x ".venv/bin/python" ]]; then
+                rm -rf .venv
+            fi
             [[ -n "$(venv_python_path)" ]] || "${PY_CMD}" -m venv .venv
             VENV_PY="$(venv_python_path)"
             [[ -n "${VENV_PY}" ]] || { echo "Backend virtual environment is unavailable." >&2; exit 1; }
