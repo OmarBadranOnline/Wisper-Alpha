@@ -21,5 +21,4 @@ Integrate reconnaissance tools into a controlled pipeline that:
 ## Runtime note
 
 - `wisper.sh` supports dependency verification on Linux environments with `apt-get`.
-- On Windows/Git Bash, Linux-only package installation steps are skipped and the script continues with clear warnings.
-- For full automatic dependency installation, run this part from WSL/Ubuntu.
+- Linux package installation behavior depends on available package managers and privileges in the current distro.

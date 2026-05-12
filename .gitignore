@@ -15,5 +15,5 @@
 *.sqlite
 *.sqlite3
 
-parts/part-3-database-dashboard-final-report/sessions/
-parts/part-2-tools-reports-automation/sessions/
+reporting/sessions/
+automation/sessions/

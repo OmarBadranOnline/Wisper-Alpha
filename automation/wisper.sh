@@ -156,7 +156,6 @@ dependency_audit() {
         print_dep_status "whois" "ok" ""
     elif has_cmd curl; then
         print_dep_status "whois" "fallback" "RDAP via curl"
-        record_hard_missing_tool "whois"
     else
         print_dep_status "whois" "missing" "needs whois or curl"
         record_hard_missing_tool "whois"
@@ -166,7 +165,6 @@ dependency_audit() {
         print_dep_status "dig" "ok" ""
     elif has_cmd nslookup; then
         print_dep_status "dig" "fallback" "using nslookup for DNS records"
-        record_hard_missing_tool "dig"
     else
         print_dep_status "dig" "missing" "needs dig or nslookup"
         record_hard_missing_tool "dig"
@@ -177,7 +175,6 @@ dependency_audit() {
         print_dep_status "dnsrecon" "ok" ""
     elif python_module_entry_works "dnsrecon"; then
         print_dep_status "dnsrecon" "fallback" "python -m dnsrecon"
-        record_hard_missing_tool "dnsrecon"
     else
         print_dep_status "dnsrecon" "missing" "passive DNS enrichment"
         record_hard_missing_tool "dnsrecon"
@@ -187,7 +184,6 @@ dependency_audit() {
         print_dep_status "whatweb" "ok" ""
     elif has_cmd curl; then
         print_dep_status "whatweb" "fallback" "HTTP header/title fingerprint fallback"
-        record_hard_missing_tool "whatweb"
     else
         print_dep_status "whatweb" "missing" "technology fingerprinting"
         record_hard_missing_tool "whatweb"
@@ -197,7 +193,6 @@ dependency_audit() {
         print_dep_status "theHarvester" "ok" ""
     elif python_module_entry_works "theHarvester"; then
         print_dep_status "theHarvester" "fallback" "python -m theHarvester"
-        record_hard_missing_tool "theHarvester"
     else
         print_dep_status "theHarvester" "missing" "advanced profile"
         record_hard_missing_tool "theHarvester"
@@ -206,7 +201,6 @@ dependency_audit() {
         print_dep_status "spiderfoot" "ok" ""
     elif python_module_entry_works "spiderfoot"; then
         print_dep_status "spiderfoot" "fallback" "python -m spiderfoot"
-        record_hard_missing_tool "spiderfoot"
     else
         print_dep_status "spiderfoot" "missing" "advanced profile optional"
         record_hard_missing_tool "spiderfoot"
@@ -215,7 +209,6 @@ dependency_audit() {
         print_dep_status "recon-ng" "ok" ""
     elif python_module_entry_works "reconng"; then
         print_dep_status "recon-ng" "fallback" "python -m reconng"
-        record_hard_missing_tool "recon-ng"
     else
         print_dep_status "recon-ng" "missing" "advanced profile optional"
         record_hard_missing_tool "recon-ng"
@@ -264,20 +257,8 @@ install_with_system_manager() {
 
 install_go_if_missing() {
     has_cmd go && return 0
-    local platform
-    platform="$(detect_platform)"
     step "Go not found. Checking installation options..."
-    if [[ "${platform}" == "windows" ]]; then
-        warn "Skipping automatic Go install on Windows to avoid interactive package-manager hangs."
-        log "Install Go manually, then re-run:"
-        log "  winget install --id GoLang.Go -e"
-        log "  or choco install golang -y"
-        log "  or scoop install go"
-        local go_win="/c/Program Files/Go/bin"
-        [[ -d "${go_win}" ]] && export PATH="${PATH}:${go_win}"
-    else
-        install_with_system_manager "golang-go" || install_with_system_manager "go" || true
-    fi
+    install_with_system_manager "golang-go" || install_with_system_manager "go" || true
     has_cmd go
 }
 
@@ -402,16 +383,12 @@ install_tools() {
     step "Runtime detected: ${os_name}"
     if [[ ${has_apt} -eq 0 ]]; then
         warn "apt-get is unavailable in this environment. System-level package install will be skipped."
-        log "If you are on Windows, run this script from WSL/Ubuntu for full automatic setup."
     fi
     if [[ -z "${pip_cmd}" ]]; then
         warn "Python pip was not found. Python tool installs will be skipped."
     elif [[ -n "${py_cmd}" ]]; then
         USER_BASE="$(${py_cmd} -m site --user-base 2>/dev/null || true)"
         if [[ -n "${USER_BASE}" ]]; then
-            if has_cmd cygpath; then
-                USER_BASE="$(cygpath -u "${USER_BASE}" 2>/dev/null || echo "${USER_BASE}")"
-            fi
             export PATH="${PATH}:${USER_BASE}/Scripts:${USER_BASE}/bin"
         fi
     fi

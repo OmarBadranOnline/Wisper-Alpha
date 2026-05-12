@@ -66,7 +66,7 @@ export function DashboardPage() {
             <span>1</span>
             <div>
               <div className="ws-guide-title">Install dependencies</div>
-              <div className="ws-small">Run <span className="ws-mono">.\run-unit-tests.ps1</span> in the project root to verify toolchain and checks.</div>
+              <div className="ws-small">Run <span className="ws-mono">./run-unit-tests.sh</span> in the project root to verify toolchain and checks.</div>
             </div>
           </div>
           <div className="ws-guide-step">
