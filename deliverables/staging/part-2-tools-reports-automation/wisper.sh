@@ -168,8 +168,8 @@ install_tools() {
 
     step "Installing SpiderFoot (OSINT aggregation)..."
     if ! command -v spiderfoot &>/dev/null; then
-        pip3 install --break-system-packages spiderfoot 2>/dev/null || \
-        warn "SpiderFoot install failed — try: pip3 install spiderfoot"
+        sudo apt-get install -y -qq spiderfoot 2>/dev/null || \
+        warn "SpiderFoot is not reliably available via pip; use distro package, Docker, or source install."
     else
         success "SpiderFoot already installed"
     fi
