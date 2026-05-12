@@ -1,7 +1,0 @@
-@import './styles/tokens.css';
-@import './styles/app.css';
-
-/* scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--bg-sunken); }
-::-webkit-scrollbar-thumb { background: var(--slate-300); border-radius: 3px; }

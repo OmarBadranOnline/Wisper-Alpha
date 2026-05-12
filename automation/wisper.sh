@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════════════════╗
-# ║              WISPER ALPHA — Automated Recon Orchestrator                ║
-# ║              Flow: Session → Scope → Profile → Run → Report             ║
+# ║              WISPER ALPHA — Automated Recon Orchestrator                 ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
-# Usage: bash wisper.sh
+
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ─── Colors & Symbols ────────────────────────────────────────────────────────
 BOLD='\033[1m'
@@ -30,12 +32,12 @@ banner() {
     echo ""
     echo -e "${CYAN}${BOLD}"
     echo "  ╔══════════════════════════════════════════════════════════════╗"
-    echo "  ║       ██╗    ██╗██╗███████╗██████╗ ███████╗██████╗          ║"
-    echo "  ║       ██║    ██║██║██╔════╝██╔══██╗██╔════╝██╔══██╗         ║"
-    echo "  ║       ██║ █╗ ██║██║███████╗██████╔╝█████╗  ██████╔╝         ║"
-    echo "  ║       ██║███╗██║██║╚════██║██╔═══╝ ██╔══╝  ██╔══██╗         ║"
-    echo "  ║       ╚███╔███╔╝██║███████║██║     ███████╗██║  ██║         ║"
-    echo "  ║        ╚══╝╚══╝ ╚═╝╚══════╝╚═╝     ╚══════╝╚═╝  ╚═╝         ║"
+    echo "  ║       ██╗    ██╗██╗███████╗██████╗ ███████╗██████╗           ║"
+    echo "  ║       ██║    ██║██║██╔════╝██╔══██╗██╔════╝██╔══██╗          ║"
+    echo "  ║       ██║ █╗ ██║██║███████╗██████╔╝█████╗  ██████╔╝          ║"
+    echo "  ║       ██║███╗██║██║╚════██║██╔═══╝ ██╔══╝  ██╔══██╗          ║"
+    echo "  ║       ╚███╔███╔╝██║███████║██║     ███████╗██║  ██║          ║"
+    echo "  ║        ╚══╝╚══╝ ╚═╝╚══════╝╚═╝     ╚══════╝╚═╝  ╚═╝          ║"
     echo "  ║                   A L P H A  v1.0                            ║"
     echo "  ║           Automated Web Attack Surface Mapper                ║"
     echo "  ╚══════════════════════════════════════════════════════════════╝"
@@ -75,6 +77,22 @@ detect_python() {
     else
         echo ""
     fi
+}
+
+bootstrap_tool_paths() {
+    local -a candidate_dirs=(
+        "${GOPATH:-${HOME}/go}/bin"
+        "${HOME}/go/bin"
+        "/usr/local/go/bin"
+    )
+
+    for dir in "${candidate_dirs[@]}"; do
+        [[ -d "${dir}" ]] || continue
+        case ":${PATH}:" in
+            *":${dir}:"*) ;;
+            *) export PATH="${dir}:${PATH}" ;;
+        esac
+    done
 }
 
 detect_platform() {
@@ -309,13 +327,523 @@ run_http_fingerprint_fallback() {
     fi
 }
 
+file_has_meaningful_data() {
+    local file="$1"
+    [[ -f "${file}" ]] || return 1
+    grep -qvE '^(=+|[[:space:]]*$| TOOL     : | COMMAND  : | STARTED  : |\[ FINISHED: |\[ TIMED OUT AFTER: )' "${file}"
+}
+
+count_meaningful_lines() {
+    local file="$1"
+    [[ -f "${file}" ]] || { echo 0; return; }
+    grep -vcE '^(=+|[[:space:]]*$| TOOL     : | COMMAND  : | STARTED  : |\[ FINISHED: |\[ TIMED OUT AFTER: )' "${file}" 2>/dev/null || echo 0
+}
+
+load_env_file() {
+    local env_file="$1"
+    [[ -f "${env_file}" ]] || return 1
+    set -a
+    # shellcheck disable=SC1090
+    source "${env_file}"
+    set +a
+}
+
+detect_llm_provider_key_and_model() {
+    LLM_PROVIDER="$(echo "${LLM_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ -z "${LLM_PROVIDER}" ]]; then
+        if [[ -n "${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}" ]]; then
+            LLM_PROVIDER="gemini"
+        elif [[ -n "${OPENAI_API_KEY:-}" ]]; then
+            LLM_PROVIDER="openai"
+        elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+            LLM_PROVIDER="anthropic"
+        elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+            LLM_PROVIDER="openrouter"
+        fi
+    fi
+
+    LLM_API_KEY=""
+    case "${LLM_PROVIDER}" in
+        gemini)
+            LLM_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
+            [[ -z "${LLM_MODEL:-}" ]] && LLM_MODEL="gemini-1.5-flash"
+            ;;
+        openai)
+            LLM_API_KEY="${OPENAI_API_KEY:-}"
+            [[ -z "${LLM_MODEL:-}" ]] && LLM_MODEL="gpt-4o-mini"
+            ;;
+        anthropic)
+            LLM_API_KEY="${ANTHROPIC_API_KEY:-}"
+            [[ -z "${LLM_MODEL:-}" ]] && LLM_MODEL="claude-3-5-haiku-latest"
+            ;;
+        openrouter)
+            LLM_API_KEY="${OPENROUTER_API_KEY:-}"
+            [[ -z "${LLM_MODEL:-}" ]] && LLM_MODEL="openai/gpt-4o-mini"
+            ;;
+        *)
+            LLM_PROVIDER=""
+            ;;
+    esac
+}
+
+upsert_env_value() {
+    local env_file="$1"
+    local key="$2"
+    local value="$3"
+    local temp_file
+    temp_file="$(mktemp)"
+
+    if [[ -f "${env_file}" ]]; then
+        awk -v k="${key}" -v v="${value}" '
+            BEGIN { found=0 }
+            $0 ~ "^" k "=" {
+                if (!found) {
+                    print k "=" v
+                    found=1
+                }
+                next
+            }
+            { print }
+            END {
+                if (!found) {
+                    print k "=" v
+                }
+            }
+        ' "${env_file}" > "${temp_file}"
+    else
+        printf "%s=%s\n" "${key}" "${value}" > "${temp_file}"
+    fi
+
+    mv "${temp_file}" "${env_file}"
+}
+
+configure_llm_api_key_interactive() {
+    echo -e "  ${YELLOW}No LLM API key detected in an env file.${RESET}"
+    echo -e "  ${DIM}To use optional AI analysis, you can use any supported provider:${RESET}"
+    echo -e "    ${CYAN}Gemini${RESET} (free tier available): https://aistudio.google.com/app/apikey"
+    echo -e "    ${CYAN}OpenAI${RESET}: https://platform.openai.com/api-keys"
+    echo -e "    ${CYAN}Anthropic${RESET}: https://console.anthropic.com/settings/keys"
+    echo -e "    ${CYAN}OpenRouter${RESET} (multi-model gateway): https://openrouter.ai/keys"
+    echo ""
+    echo -e "  ${DIM}Expected env keys: GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY${RESET}"
+    echo -e "  ${DIM}Optional model override key: LLM_MODEL${RESET}"
+    echo ""
+
+    local setup_now=""
+    prompt "Configure an API key now for this run? [y/N]"
+    read -r setup_now
+    [[ "${setup_now,,}" != "y" ]] && return 1
+
+    local provider_choice=""
+    echo ""
+    echo -e "  ${CYAN}[1]${RESET} Gemini (free tier)"
+    echo -e "  ${CYAN}[2]${RESET} OpenAI"
+    echo -e "  ${CYAN}[3]${RESET} Anthropic"
+    echo -e "  ${CYAN}[4]${RESET} OpenRouter"
+    echo ""
+    prompt "Choose provider [1-4]:"
+    read -r provider_choice
+    case "${provider_choice}" in
+        1) LLM_PROVIDER="gemini" ;;
+        2) LLM_PROVIDER="openai" ;;
+        3) LLM_PROVIDER="anthropic" ;;
+        4) LLM_PROVIDER="openrouter" ;;
+        *) warn "Invalid provider choice — skipping AI analysis."; return 1 ;;
+    esac
+
+    echo ""
+    prompt "Paste ${LLM_PROVIDER} API key (input hidden):"
+    read -rs LLM_API_KEY
+    echo ""
+    [[ -z "${LLM_API_KEY}" ]] && { warn "No API key provided."; return 1; }
+
+    local model_input=""
+    prompt "Model name (press ENTER for default):"
+    read -r model_input
+    if [[ -n "${model_input}" ]]; then
+        LLM_MODEL="${model_input}"
+    fi
+
+    # Export keys so they survive back into the parent shell scope
+    case "${LLM_PROVIDER}" in
+        gemini)     export GEMINI_API_KEY="${LLM_API_KEY}" ;;
+        openai)     export OPENAI_API_KEY="${LLM_API_KEY}" ;;
+        anthropic)  export ANTHROPIC_API_KEY="${LLM_API_KEY}" ;;
+        openrouter) export OPENROUTER_API_KEY="${LLM_API_KEY}" ;;
+    esac
+    export LLM_PROVIDER LLM_API_KEY LLM_MODEL
+
+    local save_key=""
+    prompt "Save these settings to ${PROJECT_ROOT}/.env for future runs? [y/N]"
+    read -r save_key
+    if [[ "${save_key,,}" == "y" ]]; then
+        local env_file="${PROJECT_ROOT}/.env"
+        upsert_env_value "${env_file}" "LLM_PROVIDER" "${LLM_PROVIDER}"
+        upsert_env_value "${env_file}" "LLM_MODEL" "${LLM_MODEL}"
+        case "${LLM_PROVIDER}" in
+            gemini)     upsert_env_value "${env_file}" "GEMINI_API_KEY" "${LLM_API_KEY}" ;;
+            openai)     upsert_env_value "${env_file}" "OPENAI_API_KEY" "${LLM_API_KEY}" ;;
+            anthropic)  upsert_env_value "${env_file}" "ANTHROPIC_API_KEY" "${LLM_API_KEY}" ;;
+            openrouter) upsert_env_value "${env_file}" "OPENROUTER_API_KEY" "${LLM_API_KEY}" ;;
+        esac
+        success "Saved LLM configuration to ${env_file}"
+    fi
+
+    return 0
+}
+
+init_llm_configuration() {
+    local -a env_candidates=(
+        "${PROJECT_ROOT}/.env"
+        "${SCRIPT_DIR}/.env"
+        "${HOME}/.wisper.env"
+    )
+    local env_file=""
+    for env_file in "${env_candidates[@]}"; do
+        [[ -f "${env_file}" ]] || continue
+        load_env_file "${env_file}" || continue
+    done
+
+    detect_llm_provider_key_and_model
+}
+
+append_meaningful_excerpt() {
+    local title="$1"
+    local file="$2"
+    local max_lines="$3"
+    [[ -f "${file}" ]] || return 0
+    file_has_meaningful_data "${file}" || return 0
+
+    echo "### ${title}"
+    grep -vE '^(=+|[[:space:]]*$| TOOL     : | COMMAND  : | STARTED  : |\[ FINISHED: |\[ TIMED OUT AFTER: )' "${file}" | head -n "${max_lines}" || true
+    echo ""
+}
+
+build_llm_prompt_context() {
+    local prompt_file="$1"
+    local subdomains=0
+    local urls=0
+    local tech=0
+    local dns=0
+
+    [[ -f "${OUTPUT_ROOT}/core/01_subfinder.txt" ]] && subdomains=$((subdomains + $(count_meaningful_lines "${OUTPUT_ROOT}/core/01_subfinder.txt")))
+    [[ -f "${OUTPUT_ROOT}/advanced/01_amass.txt" ]] && subdomains=$((subdomains + $(count_meaningful_lines "${OUTPUT_ROOT}/advanced/01_amass.txt")))
+    [[ -f "${OUTPUT_ROOT}/core/06_waybackurls.txt" ]] && urls="$(count_meaningful_lines "${OUTPUT_ROOT}/core/06_waybackurls.txt")"
+    [[ -f "${OUTPUT_ROOT}/core/07_whatweb.txt" ]] && tech="$(count_meaningful_lines "${OUTPUT_ROOT}/core/07_whatweb.txt")"
+    [[ -f "${OUTPUT_ROOT}/core/03_dig_A.txt" ]] && dns="$(count_meaningful_lines "${OUTPUT_ROOT}/core/03_dig_A.txt")"
+
+    {
+        echo "You are a senior penetration testing analyst writing a professional recon report."
+        echo "Rules: only use evidence provided; never invent findings; no exploit code; cite exact data."
+        echo ""
+        echo "Target: ${TARGET_DOMAIN} | Profile: ${PROFILE} | Session: ${SESSION_ID}"
+        echo "Session Start: ${SESSION_START} | Report Date: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "Evidence counts: subdomains=${subdomains}, URLs=${urls}, tech_fingerprints=${tech}, dns_lines=${dns}"
+        echo ""
+        echo "=== REQUIRED REPORT SECTIONS ==="
+        echo "## 1. EXECUTIVE SUMMARY"
+        echo "Overall risk level (Critical/High/Medium/Low), key findings summary, top 3 concerns."
+        echo "## 2. ATTACK SURFACE OVERVIEW"
+        echo "Table of all assets: subdomain/IP, inferred purpose, exposure level, data source."
+        echo "## 3. FINDINGS TABLE"
+        echo "Markdown table: | # | Finding | Evidence (cite exact data) | Severity | Likelihood | Impact |"
+        echo "Include: exposed subdomains, outdated/vulnerable tech, TXT leaks, cert transparency exposures,"
+        echo "sensitive historical URLs, email harvesting risk, DNS misconfigs, missing security controls."
+        echo "## 4. DETAILED FINDINGS"
+        echo "Per finding: observed data (quote it), why it matters, attacker abuse scenario (defensive), confidence."
+        echo "## 5. HISTORICAL URL ANALYSIS"
+        echo "Categorise wayback URLs: admin panels, login pages, API endpoints, backup files, debug pages,"
+        echo "parameter injection points, sensitive paths. Highlight highest-risk URLs."
+        echo "## 6. INFRASTRUCTURE PROFILE"
+        echo "Hosting/ASN, DNS architecture, mail config, certificate issuer, TLS hints, CDN/cloud presence."
+        echo "## 7. PRIORITISED REMEDIATION"
+        echo "IMMEDIATE (24-48h) | SHORT-TERM (30 days) | LONG-TERM (architecture hardening)"
+        echo "## 8. CONFIDENCE & VALIDATION"
+        echo "Per finding: confidence (High/Medium/Low) and what active testing would confirm it."
+        echo ""
+        echo "Recon evidence excerpts:"
+        echo ""
+        append_meaningful_excerpt "Subfinder subdomains" "${OUTPUT_ROOT}/core/01_subfinder.txt" 120
+        append_meaningful_excerpt "Amass subdomains" "${OUTPUT_ROOT}/advanced/01_amass.txt" 120
+        append_meaningful_excerpt "WHOIS registration" "${OUTPUT_ROOT}/core/02_whois.txt" 100
+        append_meaningful_excerpt "DNS A records" "${OUTPUT_ROOT}/core/03_dig_A.txt" 60
+        append_meaningful_excerpt "DNS MX records" "${OUTPUT_ROOT}/core/03_dig_MX.txt" 40
+        append_meaningful_excerpt "DNS NS records" "${OUTPUT_ROOT}/core/03_dig_NS.txt" 40
+        append_meaningful_excerpt "DNS TXT records" "${OUTPUT_ROOT}/core/03_dig_TXT.txt" 40
+        append_meaningful_excerpt "nslookup" "${OUTPUT_ROOT}/core/04_nslookup.txt" 40
+        append_meaningful_excerpt "DNSRecon full output" "${OUTPUT_ROOT}/core/05_dnsrecon.txt" 120
+        append_meaningful_excerpt "Wayback historical URLs" "${OUTPUT_ROOT}/core/06_waybackurls.txt" 250
+        append_meaningful_excerpt "WhatWeb technology fingerprints" "${OUTPUT_ROOT}/core/07_whatweb.txt" 80
+        append_meaningful_excerpt "crt.sh certificate transparency" "${OUTPUT_ROOT}/advanced/03_crtsh.txt" 100
+        append_meaningful_excerpt "theHarvester emails and hosts" "${OUTPUT_ROOT}/advanced/02_theharvester.txt" 100
+        append_meaningful_excerpt "Shodan host data" "${OUTPUT_ROOT}/advanced/04_shodan.txt" 60
+    } > "${prompt_file}"
+}
+
+extract_llm_response_text() {
+    local provider="$1"
+    local raw_response="$2"
+    local py_cmd=""
+    py_cmd="$(detect_python)"
+    [[ -n "${py_cmd}" ]] || { warn "Python not found — cannot parse LLM response."; return 1; }
+
+    local parser_script
+    parser_script="$(mktemp)"
+    cat > "${parser_script}" <<'PY'
+import json
+import sys
+
+provider = sys.argv[1]
+raw = sys.argv[2]
+
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError as e:
+    print(f"[LLM ERROR] Invalid JSON from API: {e}", file=sys.stderr)
+    print(f"[LLM RAW]  {raw[:500]}", file=sys.stderr)
+    raise SystemExit(1)
+
+# Surface API-level errors before attempting extraction
+if "error" in data:
+    err = data["error"]
+    msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+    print(f"[LLM API ERROR] {msg}", file=sys.stderr)
+    raise SystemExit(1)
+
+text = ""
+if provider == "gemini":
+    cands = data.get("candidates", [])
+    if not cands:
+        fb = data.get("promptFeedback", {})
+        reason = fb.get("blockReason", "unknown — no candidates returned")
+        print(f"[LLM ERROR] Gemini returned no candidates. Reason: {reason}", file=sys.stderr)
+        raise SystemExit(1)
+    parts = cands[0].get("content", {}).get("parts", [])
+    text = "\n".join(p.get("text", "") for p in parts if p.get("text"))
+elif provider in ("openai", "openrouter"):
+    choices = data.get("choices", [])
+    if not choices:
+        print(f"[LLM ERROR] No choices in response: {raw[:300]}", file=sys.stderr)
+        raise SystemExit(1)
+    content = choices[0].get("message", {}).get("content", "")
+    if isinstance(content, list):
+        text = "\n".join(item.get("text", "") for item in content if isinstance(item, dict))
+    else:
+        text = content or ""
+elif provider == "anthropic":
+    content = data.get("content", [])
+    text = "\n".join(item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text")
+
+if not text.strip():
+    print(f"[LLM ERROR] Response parsed but text was empty.", file=sys.stderr)
+    raise SystemExit(1)
+
+print(text.strip())
+PY
+
+    if ! ${py_cmd} "${parser_script}" "${provider}" "${raw_response}"; then
+        rm -f "${parser_script}"
+        return 1
+    fi
+
+    rm -f "${parser_script}"
+}
+
+run_llm_analysis_request() {
+    local prompt_file="$1"
+    local output_file="$2"
+    local py_cmd=""
+    py_cmd="$(detect_python)"
+    [[ -n "${py_cmd}" ]] || { warn "Python is required for JSON payload handling."; return 1; }
+
+    local payload=""
+    local response=""
+    local curl_exit=0
+
+    case "${LLM_PROVIDER}" in
+        gemini)
+            payload="$(${py_cmd} - "${prompt_file}" <<'PY'
+import json, pathlib, sys
+prompt = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="ignore")
+print(json.dumps({"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2}}))
+PY
+)"
+            response="$(curl -sS --fail-with-body -X POST \
+                -H "Content-Type: application/json" \
+                "https://generativelanguage.googleapis.com/v1beta/models/${LLM_MODEL}:generateContent?key=${LLM_API_KEY}" \
+                -d "${payload}" 2>&1)" || curl_exit=$?
+            ;;
+        openai)
+            payload="$(${py_cmd} - "${prompt_file}" "${LLM_MODEL}" <<'PY'
+import json, pathlib, sys
+prompt = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="ignore")
+model = sys.argv[2]
+print(json.dumps({"model": model, "temperature": 0.2, "messages": [{"role": "system", "content": "You are a senior penetration testing analyst."}, {"role": "user", "content": prompt}]}))
+PY
+)"
+            response="$(curl -sS --fail-with-body -X POST \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer ${LLM_API_KEY}" \
+                "https://api.openai.com/v1/chat/completions" \
+                -d "${payload}" 2>&1)" || curl_exit=$?
+            ;;
+        anthropic)
+            payload="$(${py_cmd} - "${prompt_file}" "${LLM_MODEL}" <<'PY'
+import json, pathlib, sys
+prompt = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="ignore")
+model = sys.argv[2]
+print(json.dumps({"model": model, "max_tokens": 1800, "temperature": 0.2, "messages": [{"role": "user", "content": prompt}]}))
+PY
+)"
+            response="$(curl -sS --fail-with-body -X POST \
+                -H "Content-Type: application/json" \
+                -H "x-api-key: ${LLM_API_KEY}" \
+                -H "anthropic-version: 2023-06-01" \
+                "https://api.anthropic.com/v1/messages" \
+                -d "${payload}" 2>&1)" || curl_exit=$?
+            ;;
+        openrouter)
+            payload="$(${py_cmd} - "${prompt_file}" "${LLM_MODEL}" <<'PY'
+import json, pathlib, sys
+prompt = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="ignore")
+model = sys.argv[2]
+print(json.dumps({"model": model, "temperature": 0.2, "messages": [{"role": "system", "content": "You are a senior penetration testing analyst."}, {"role": "user", "content": prompt}]}))
+PY
+)"
+            response="$(curl -sS --fail-with-body -X POST \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer ${LLM_API_KEY}" \
+                "https://openrouter.ai/api/v1/chat/completions" \
+                -d "${payload}" 2>&1)" || curl_exit=$?
+            ;;
+        *)
+            warn "Unknown LLM provider: ${LLM_PROVIDER}"
+            return 1
+            ;;
+    esac
+
+    if [[ ${curl_exit} -ne 0 ]]; then
+        warn "curl failed (exit ${curl_exit}) — check network access."
+        [[ -n "${response}" ]] && warn "curl output: ${response:0:300}"
+        return 1
+    fi
+
+    if [[ -z "${response}" ]]; then
+        warn "Empty response from ${LLM_PROVIDER} API."
+        return 1
+    fi
+
+    if ! extract_llm_response_text "${LLM_PROVIDER}" "${response}" > "${output_file}"; then
+        warn "Failed to parse ${LLM_PROVIDER} response. Raw snippet: ${response:0:300}"
+        return 1
+    fi
+
+    return 0
+}
+
+generate_optional_llm_analysis() {
+    local enable_analysis=""
+    prompt "Generate optional AI threat analysis report? [y/N]"
+    read -r enable_analysis
+    [[ "${enable_analysis,,}" == "y" ]] || return 0
+
+    init_llm_configuration
+
+    log "LLM config loaded — Provider: ${LLM_PROVIDER:-NONE}  Key: ${LLM_API_KEY:+SET (hidden)}${LLM_API_KEY:-NOT SET}  Model: ${LLM_MODEL:-NONE}"
+
+    if [[ -z "${LLM_PROVIDER:-}" || -z "${LLM_API_KEY:-}" ]]; then
+        configure_llm_api_key_interactive || {
+            warn "AI analysis skipped (no provider/key configured)."
+            return 0
+        }
+        # Key vars already exported by configure_llm_api_key_interactive — no re-detect needed
+    fi
+
+    log "Post-config — Provider: ${LLM_PROVIDER:-NONE}  Model: ${LLM_MODEL:-NONE}  Key: ${LLM_API_KEY:+SET}${LLM_API_KEY:-NOT SET}"
+
+    if [[ -z "${LLM_PROVIDER:-}" || -z "${LLM_API_KEY:-}" || -z "${LLM_MODEL:-}" ]]; then
+        warn "AI analysis skipped (incomplete LLM configuration)."
+        warn "  Provider='${LLM_PROVIDER:-}' Model='${LLM_MODEL:-}' Key=${LLM_API_KEY:+SET}${LLM_API_KEY:-NOT SET}"
+        return 0
+    fi
+
+    local prompt_file
+    prompt_file="$(mktemp)"
+    local analysis_body_file
+    analysis_body_file="$(mktemp)"
+    LLM_ANALYSIS_FILE="${OUTPUT_ROOT}/reports/WISPER_AI_ANALYSIS_${SESSION_ID}_${SAFE_NAME}.md"
+
+    step "Building recon context for AI prompt..."
+    build_llm_prompt_context "${prompt_file}"
+    log "Prompt context built ($(wc -l < "${prompt_file}") lines)"
+
+    step "Sending request to ${LLM_PROVIDER} API (model: ${LLM_MODEL})..."
+
+    if ! run_llm_analysis_request "${prompt_file}" "${analysis_body_file}"; then
+        warn "AI analysis request failed."
+        rm -f "${prompt_file}" "${analysis_body_file}"
+        return 0
+    fi
+
+    step "Writing AI analysis report..."
+    {
+        echo "# Wisper AI Threat Analysis"
+        echo ""
+        echo "- Session ID: ${SESSION_ID}"
+        echo "- Target: ${TARGET_DOMAIN}"
+        echo "- Profile: ${PROFILE}"
+        echo "- Provider: ${LLM_PROVIDER}"
+        echo "- Model: ${LLM_MODEL}"
+        echo "- Generated at: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo ""
+        cat "${analysis_body_file}"
+        echo ""
+        echo "---"
+        echo "_Generated from collected recon evidence. Validate manually before remediation decisions._"
+    } > "${LLM_ANALYSIS_FILE}"
+
+    success "AI analysis generated → ${LLM_ANALYSIS_FILE}"
+    rm -f "${prompt_file}" "${analysis_body_file}"
+}
+
+start_loading_effect() {
+    local label="$1"
+    local detail="${2:-collecting data}"
+
+    if [[ ! -t 1 ]]; then
+        return 0
+    fi
+
+    (
+        local frames='|/-\'
+        local i=0
+        while true; do
+            printf '\r  %s %s %s %s' "${ARROW}" "${WHITE}${label}${RESET}" "${DIM}${detail}${RESET}" "${frames:i++%4:1}" >&2
+            sleep 0.15
+        done
+    ) &
+
+    echo $!
+}
+
+stop_loading_effect() {
+    local spinner_pid="$1"
+    [[ -n "${spinner_pid}" ]] || return 0
+    kill "${spinner_pid}" >/dev/null 2>&1 || true
+    wait "${spinner_pid}" >/dev/null 2>&1 || true
+    if [[ -t 1 ]]; then
+        printf '\r\033[K' >&2
+    fi
+}
+
 resolve_ip_for_target() {
     if has_cmd dig; then
-        dig +short "${TARGET_DOMAIN}" | head -1
+        dig +short "${TARGET_DOMAIN}" 2>/dev/null | head -1 || true
         return
     fi
     if has_cmd nslookup; then
-        nslookup "${TARGET_DOMAIN}" 2>/dev/null | awk '/^Address: / {print $2}' | head -1
+        nslookup "${TARGET_DOMAIN}" 2>/dev/null | awk '/^Address: / {print $2}' | head -1 || true
         return
     fi
     echo ""
@@ -326,12 +854,20 @@ run_tool() {
     local tool_name="$1"
     local out_file="$2"
     shift 2
+    local timeout_seconds=""
+    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+        timeout_seconds="$1"
+        shift
+    fi
     local cmd=("$@")
 
     echo ""
     echo -e "  ${MAGENTA}⌖ Running:${RESET} ${DIM}${cmd[*]}${RESET}"
     echo -e "  ${DIM}  Output  → ${out_file}${RESET}"
     divider
+
+    local spinner_pid=""
+    spinner_pid="$(start_loading_effect "${tool_name}" "collecting data")"
 
     # Write header to file
     {
@@ -343,14 +879,41 @@ run_tool() {
         echo ""
     } > "${out_file}"
 
+    local tool_exit=0
+
     # Run — tee to terminal AND append to file
-    if "${cmd[@]}" 2>&1 | tee -a "${out_file}"; then
-        echo "" >> "${out_file}"
-        echo "[ FINISHED: $(date '+%Y-%m-%d %H:%M:%S') ]" >> "${out_file}"
-        success "${tool_name} complete → ${out_file}"
+    if [[ -n "${timeout_seconds}" && -n "$(command -v timeout 2>/dev/null || true)" ]]; then
+        timeout --preserve-status --signal=INT "${timeout_seconds}" "${cmd[@]}" 2>&1 \
+            | tee -a "${out_file}" || true
+        tool_exit="${PIPESTATUS[0]}"
+        if [[ ${tool_exit} -eq 124 || ${tool_exit} -eq 137 ]]; then
+            echo "" >> "${out_file}"
+            echo "[ TIMED OUT AFTER: ${timeout_seconds}s ]" >> "${out_file}"
+            warn "${tool_name} timed out after ${timeout_seconds}s"
+        elif [[ ${tool_exit} -ne 0 ]]; then
+            echo "" >> "${out_file}"
+            echo "[ FINISHED WITH ERRORS: $(date '+%Y-%m-%d %H:%M:%S') ]" >> "${out_file}"
+            warn "${tool_name} exited with code ${tool_exit}"
+        else
+            echo "" >> "${out_file}"
+            echo "[ FINISHED: $(date '+%Y-%m-%d %H:%M:%S') ]" >> "${out_file}"
+            success "${tool_name} complete → ${out_file}"
+        fi
     else
-        warn "${tool_name} returned non-zero (may be normal for some tools)"
+        "${cmd[@]}" 2>&1 | tee -a "${out_file}" || true
+        tool_exit="${PIPESTATUS[0]}"
+        if [[ ${tool_exit} -ne 0 ]]; then
+            echo "" >> "${out_file}"
+            echo "[ FINISHED WITH ERRORS: $(date '+%Y-%m-%d %H:%M:%S') ]" >> "${out_file}"
+            warn "${tool_name} exited with code ${tool_exit}"
+        else
+            echo "" >> "${out_file}"
+            echo "[ FINISHED: $(date '+%Y-%m-%d %H:%M:%S') ]" >> "${out_file}"
+            success "${tool_name} complete → ${out_file}"
+        fi
     fi
+
+    stop_loading_effect "${spinner_pid}"
     divider
 }
 
@@ -433,6 +996,7 @@ install_tools() {
     # ── Go tools ──
     export GOPATH="${HOME}/go"
     export PATH="${PATH}:${GOPATH}/bin"
+    bootstrap_tool_paths
     install_go_if_missing || true
 
     if command -v go >/dev/null 2>&1; then
@@ -627,7 +1191,7 @@ run_core() {
     # ── 1. Subfinder ──
     if command -v subfinder &>/dev/null; then
         run_tool "Subfinder" \
-            "${OUT}/01_subfinder.txt" \
+            "${OUT}/01_subfinder.txt" 120 \
             subfinder -d "${TARGET_DOMAIN}" -silent
     else
         warn "Subfinder not found — skipping"
@@ -655,11 +1219,11 @@ run_core() {
     # ── 5. DNSRecon ──
     if command -v dnsrecon &>/dev/null; then
         run_tool "DNSRecon (passive std)" \
-            "${OUT}/05_dnsrecon.txt" \
+            "${OUT}/05_dnsrecon.txt" 120 \
             dnsrecon -d "${TARGET_DOMAIN}" -t std
     elif python_module_entry_works "dnsrecon"; then
         run_tool "DNSRecon (python module fallback)" \
-            "${OUT}/05_dnsrecon.txt" \
+            "${OUT}/05_dnsrecon.txt" 120 \
             bash -c "$(detect_python) -m dnsrecon -d '${TARGET_DOMAIN}' -t std"
     else
         warn "DNSRecon not found — skipping"
@@ -668,7 +1232,7 @@ run_core() {
     # ── 6. waybackurls ──
     if command -v waybackurls &>/dev/null; then
         run_tool "waybackurls" \
-            "${OUT}/06_waybackurls.txt" \
+            "${OUT}/06_waybackurls.txt" 120 \
             bash -c "echo '${TARGET_DOMAIN}' | waybackurls"
     else
         warn "waybackurls not found — skipping"
@@ -677,7 +1241,7 @@ run_core() {
     # ── 7. WhatWeb ──
     if command -v whatweb &>/dev/null; then
         run_tool "WhatWeb" \
-            "${OUT}/07_whatweb.txt" \
+            "${OUT}/07_whatweb.txt" 120 \
             whatweb "https://${TARGET_DOMAIN}" --color=never
     elif has_cmd curl; then
         run_http_fingerprint_fallback "${OUT}/07_whatweb.txt"
@@ -697,6 +1261,8 @@ run_core() {
         echo "================================================================"
         echo ""
         for f in "${OUT}"/0*.txt; do
+            [ -f "${f}" ] || continue
+            file_has_meaningful_data "${f}" || continue
             echo ""
             echo "────────────────────────────────────────────────────────"
             echo " FILE: $(basename "${f}")"
@@ -725,7 +1291,7 @@ run_advanced() {
     CORE_OUT="${OUTPUT_ROOT}/core"
 
     if command -v subfinder &>/dev/null; then
-        run_tool "Subfinder" "${CORE_OUT}/01_subfinder.txt" \
+        run_tool "Subfinder" "${CORE_OUT}/01_subfinder.txt" 120 \
             subfinder -d "${TARGET_DOMAIN}" -silent
     fi
 
@@ -742,18 +1308,18 @@ run_advanced() {
     fi
 
     if command -v dnsrecon &>/dev/null; then
-        run_tool "DNSRecon" "${CORE_OUT}/05_dnsrecon.txt" dnsrecon -d "${TARGET_DOMAIN}" -t std
+        run_tool "DNSRecon" "${CORE_OUT}/05_dnsrecon.txt" 120 dnsrecon -d "${TARGET_DOMAIN}" -t std
     elif python_module_entry_works "dnsrecon"; then
-        run_tool "DNSRecon (python module fallback)" "${CORE_OUT}/05_dnsrecon.txt" bash -c "$(detect_python) -m dnsrecon -d '${TARGET_DOMAIN}' -t std"
+        run_tool "DNSRecon (python module fallback)" "${CORE_OUT}/05_dnsrecon.txt" 120 bash -c "$(detect_python) -m dnsrecon -d '${TARGET_DOMAIN}' -t std"
     fi
 
     if command -v waybackurls &>/dev/null; then
-        run_tool "waybackurls" "${CORE_OUT}/06_waybackurls.txt" \
+        run_tool "waybackurls" "${CORE_OUT}/06_waybackurls.txt" 120 \
             bash -c "echo '${TARGET_DOMAIN}' | waybackurls"
     fi
 
     if command -v whatweb &>/dev/null; then
-        run_tool "WhatWeb" "${CORE_OUT}/07_whatweb.txt" \
+        run_tool "WhatWeb" "${CORE_OUT}/07_whatweb.txt" 120 \
             whatweb "https://${TARGET_DOMAIN}" --color=never
     elif has_cmd curl; then
         run_http_fingerprint_fallback "${CORE_OUT}/07_whatweb.txt"
@@ -767,7 +1333,7 @@ run_advanced() {
     # Amass
     if command -v amass &>/dev/null; then
         run_tool "Amass (passive enum)" \
-            "${OUT}/01_amass.txt" \
+            "${OUT}/01_amass.txt" 180 \
             amass enum -passive -d "${TARGET_DOMAIN}"
     else
         warn "Amass not found — skipping (install: go install github.com/owasp-amass/amass/v4/...@master)"
@@ -776,29 +1342,27 @@ run_advanced() {
     # theHarvester
     if command -v theHarvester &>/dev/null; then
         run_tool "theHarvester (all sources)" \
-            "${OUT}/02_theharvester.txt" \
-            theHarvester -d "${TARGET_DOMAIN}" -b bing,google,yahoo,duckduckgo,crtsh
+            "${OUT}/02_theharvester.txt" 180 \
+            theHarvester -d "${TARGET_DOMAIN}" -b bing,yahoo,duckduckgo,crtsh
     elif python_module_entry_works "theHarvester"; then
         run_tool "theHarvester (python module fallback)" \
-            "${OUT}/02_theharvester.txt" \
-            bash -c "$(detect_python) -m theHarvester -d '${TARGET_DOMAIN}' -b bing,google,yahoo,duckduckgo,crtsh"
+            "${OUT}/02_theharvester.txt" 180 \
+            bash -c "$(detect_python) -m theHarvester -d '${TARGET_DOMAIN}' -b bing,yahoo,duckduckgo,crtsh"
     else
         warn "theHarvester not found — skipping"
     fi
 
     # crt.sh certificate transparency (passive, no tool needed — curl)
     run_tool "crt.sh (certificate transparency)" \
-        "${OUT}/03_crtsh.txt" \
+        "${OUT}/03_crtsh.txt" 120 \
         bash -c "curl -s 'https://crt.sh/?q=%25.${TARGET_DOMAIN}&output=json' | python3 -m json.tool 2>/dev/null | grep '\"name_value\"' | sort -u | head -50 || echo 'crt.sh query returned no results'"
 
     # Shodan CLI hint (passive)
     if command -v shodan &>/dev/null; then
-        TARGET_IP="$(resolve_ip_for_target)"
-        if [[ -z "${TARGET_IP}" ]]; then
-            TARGET_IP="${TARGET_DOMAIN}"
-        fi
+        TARGET_IP="$(resolve_ip_for_target || true)"
+        [[ -z "${TARGET_IP}" ]] && TARGET_IP="${TARGET_DOMAIN}"
         run_tool "Shodan (host info)" \
-            "${OUT}/04_shodan.txt" \
+            "${OUT}/04_shodan.txt" 120 \
             bash -c "shodan host ${TARGET_IP} 2>/dev/null || echo 'Shodan: configure API key with: shodan init YOUR_KEY'"
     else
         {
@@ -808,7 +1372,7 @@ run_advanced() {
             echo ""
             echo "Manual search: https://www.shodan.io/search?query=${TARGET_DOMAIN}"
         } > "${OUT}/04_shodan_manual.txt"
-        cat "${OUT}/04_shodan_manual.txt"
+        cat "${OUT}/04_shodan_manual.txt" || true
         warn "Shodan CLI not installed — manual URL saved"
     fi
 
@@ -821,14 +1385,14 @@ run_advanced() {
         echo "  pip3 install censys"
         echo "  censys config  # enter API ID + Secret from censys.io"
         echo "  censys search '${TARGET_DOMAIN}'"
-    } > "${OUT}/05_censys_manual.txt"
-    cat "${OUT}/05_censys_manual.txt"
+    } > "${OUT}/05_censys_manual.txt" || true
+    cat "${OUT}/05_censys_manual.txt" || true
 
     # SpiderFoot CLI (if available)
     if command -v spiderfoot &>/dev/null; then
         warn "SpiderFoot detected — run interactively: spiderfoot -l 127.0.0.1:5001"
         echo "SpiderFoot available. Run interactively with: spiderfoot -l 127.0.0.1:5001" \
-            > "${OUT}/06_spiderfoot_note.txt"
+            > "${OUT}/06_spiderfoot_note.txt" || true
     fi
 
     # Recon-ng note
@@ -843,8 +1407,8 @@ run_advanced() {
             echo "  use recon/hosts-hosts/resolve"
             echo "  set SOURCE ${TARGET_DOMAIN}"
             echo "  run"
-        } > "${OUT}/07_recon_ng_guide.txt"
-        cat "${OUT}/07_recon_ng_guide.txt"
+        } > "${OUT}/07_recon_ng_guide.txt" || true
+        cat "${OUT}/07_recon_ng_guide.txt" || true
     fi
 
     # ── Merge all outputs ──
@@ -861,6 +1425,7 @@ run_advanced() {
         echo "─── CORE PHASE ─────────────────────────────────────────────────"
         for f in "${CORE_OUT}"/0*.txt; do
             [ -f "${f}" ] || continue
+            file_has_meaningful_data "${f}" || continue
             echo ""
             echo "  FILE: $(basename "${f}")"
             echo "  ──────────────────────────────────────────────────────────"
@@ -870,6 +1435,7 @@ run_advanced() {
         echo "─── ADVANCED PHASE ─────────────────────────────────────────────"
         for f in "${OUT}"/0*.txt; do
             [ -f "${f}" ] || continue
+            file_has_meaningful_data "${f}" || continue
             echo ""
             echo "  FILE: $(basename "${f}")"
             echo "  ──────────────────────────────────────────────────────────"
@@ -895,21 +1461,21 @@ review_dashboard() {
     TECH_COUNT=0
     DNS_COUNT=0
 
-    if [ -f "${OUTPUT_ROOT}/core/01_subfinder.txt" ]; then
-        SUBDOMAIN_COUNT=$(grep -c '.' "${OUTPUT_ROOT}/core/01_subfinder.txt" 2>/dev/null || echo 0)
+    if file_has_meaningful_data "${OUTPUT_ROOT}/core/01_subfinder.txt"; then
+        SUBDOMAIN_COUNT=$(count_meaningful_lines "${OUTPUT_ROOT}/core/01_subfinder.txt")
     fi
-    if [ -f "${OUTPUT_ROOT}/advanced/01_amass.txt" ]; then
-        AMASS_COUNT=$(grep -c '.' "${OUTPUT_ROOT}/advanced/01_amass.txt" 2>/dev/null || echo 0)
+    if file_has_meaningful_data "${OUTPUT_ROOT}/advanced/01_amass.txt"; then
+        AMASS_COUNT=$(count_meaningful_lines "${OUTPUT_ROOT}/advanced/01_amass.txt")
         SUBDOMAIN_COUNT=$((SUBDOMAIN_COUNT + AMASS_COUNT))
     fi
-    if [ -f "${OUTPUT_ROOT}/core/06_waybackurls.txt" ]; then
-        URL_COUNT=$(grep -c 'http' "${OUTPUT_ROOT}/core/06_waybackurls.txt" 2>/dev/null || echo 0)
+    if file_has_meaningful_data "${OUTPUT_ROOT}/core/06_waybackurls.txt"; then
+        URL_COUNT=$(count_meaningful_lines "${OUTPUT_ROOT}/core/06_waybackurls.txt")
     fi
-    if [ -f "${OUTPUT_ROOT}/core/07_whatweb.txt" ]; then
-        TECH_COUNT=$(grep -c '\[' "${OUTPUT_ROOT}/core/07_whatweb.txt" 2>/dev/null || echo 0)
+    if file_has_meaningful_data "${OUTPUT_ROOT}/core/07_whatweb.txt"; then
+        TECH_COUNT=$(count_meaningful_lines "${OUTPUT_ROOT}/core/07_whatweb.txt")
     fi
-    if [ -f "${OUTPUT_ROOT}/core/03_dig_A.txt" ]; then
-        DNS_COUNT=$(grep -c '.' "${OUTPUT_ROOT}/core/03_dig_A.txt" 2>/dev/null || echo 0)
+    if file_has_meaningful_data "${OUTPUT_ROOT}/core/03_dig_A.txt"; then
+        DNS_COUNT=$(count_meaningful_lines "${OUTPUT_ROOT}/core/03_dig_A.txt")
     fi
 
     echo -e "  ${DIM}┌────────────────────────────────────────────────┐${RESET}"
@@ -924,6 +1490,7 @@ review_dashboard() {
 
     echo -e "  ${WHITE}Output Files:${RESET}"
     find "${OUTPUT_ROOT}" -name "*.txt" | sort | while read -r f; do
+        file_has_meaningful_data "${f}" || continue
         SIZE=$(wc -l < "${f}" 2>/dev/null || echo 0)
         printf "  ${DIM}│${RESET}  ${CYAN}%-50s${RESET}  ${DIM}%4d lines${RESET}\n" "${f}" "${SIZE}"
     done
@@ -954,15 +1521,21 @@ inspect_findings() {
             1)
                 echo ""
                 echo -e "  ${CYAN}${BOLD}── Subdomains ──────────────────────────────────────────────${RESET}"
-                [ -f "${OUTPUT_ROOT}/core/01_subfinder.txt" ] && cat "${OUTPUT_ROOT}/core/01_subfinder.txt" || warn "No subfinder output"
-                [ -f "${OUTPUT_ROOT}/advanced/01_amass.txt" ] && cat "${OUTPUT_ROOT}/advanced/01_amass.txt" || true
+                if file_has_meaningful_data "${OUTPUT_ROOT}/core/01_subfinder.txt"; then
+                    cat "${OUTPUT_ROOT}/core/01_subfinder.txt"
+                else
+                    warn "No subfinder output"
+                fi
+                if file_has_meaningful_data "${OUTPUT_ROOT}/advanced/01_amass.txt"; then
+                    cat "${OUTPUT_ROOT}/advanced/01_amass.txt"
+                fi
                 ;;
             2)
                 echo ""
                 echo -e "  ${CYAN}${BOLD}── DNS Records ─────────────────────────────────────────────${RESET}"
                 for rec in A MX NS TXT; do
                     f="${OUTPUT_ROOT}/core/03_dig_${rec}.txt"
-                    if [ -f "${f}" ]; then
+                    if file_has_meaningful_data "${f}"; then
                         echo -e "  ${YELLOW}${rec}:${RESET}"
                         cat "${f}"
                     fi
@@ -971,7 +1544,7 @@ inspect_findings() {
             3)
                 echo ""
                 echo -e "  ${CYAN}${BOLD}── WHOIS ───────────────────────────────────────────────────${RESET}"
-                if [ -f "${OUTPUT_ROOT}/core/02_whois.txt" ]; then
+                if file_has_meaningful_data "${OUTPUT_ROOT}/core/02_whois.txt"; then
                     grep -E "(Domain|Registrar|Name Server|Creation|Expiry|Email|handle|ldhName|status)" "${OUTPUT_ROOT}/core/02_whois.txt" | head -30 || head -30 "${OUTPUT_ROOT}/core/02_whois.txt"
                 else
                     warn "No WHOIS output"
@@ -980,17 +1553,29 @@ inspect_findings() {
             4)
                 echo ""
                 echo -e "  ${CYAN}${BOLD}── Historical URLs (top 30) ────────────────────────────────${RESET}"
-                [ -f "${OUTPUT_ROOT}/core/06_waybackurls.txt" ] && head -30 "${OUTPUT_ROOT}/core/06_waybackurls.txt" || warn "No waybackurls output"
+                if file_has_meaningful_data "${OUTPUT_ROOT}/core/06_waybackurls.txt"; then
+                    head -30 "${OUTPUT_ROOT}/core/06_waybackurls.txt"
+                else
+                    warn "No waybackurls output"
+                fi
                 ;;
             5)
                 echo ""
                 echo -e "  ${CYAN}${BOLD}── Technology Fingerprints ─────────────────────────────────${RESET}"
-                [ -f "${OUTPUT_ROOT}/core/07_whatweb.txt" ] && cat "${OUTPUT_ROOT}/core/07_whatweb.txt" || warn "No WhatWeb output"
+                if file_has_meaningful_data "${OUTPUT_ROOT}/core/07_whatweb.txt"; then
+                    cat "${OUTPUT_ROOT}/core/07_whatweb.txt"
+                else
+                    warn "No WhatWeb output"
+                fi
                 ;;
             6)
                 echo ""
                 echo -e "  ${CYAN}${BOLD}── Certificate Transparency ────────────────────────────────${RESET}"
-                [ -f "${OUTPUT_ROOT}/advanced/03_crtsh.txt" ] && cat "${OUTPUT_ROOT}/advanced/03_crtsh.txt" || warn "No crt.sh output (advanced profile only)"
+                if file_has_meaningful_data "${OUTPUT_ROOT}/advanced/03_crtsh.txt"; then
+                    cat "${OUTPUT_ROOT}/advanced/03_crtsh.txt"
+                else
+                    warn "No crt.sh output (advanced profile only)"
+                fi
                 ;;
             s|S) break ;;
             *)  error "Enter 1-6 or s" ;;
@@ -1013,11 +1598,14 @@ open_evidence() {
     echo ""
 
     EVIDENCE_DIR="${OUTPUT_ROOT}/evidence"
-    cp "${OUTPUT_ROOT}/core/"*.txt     "${EVIDENCE_DIR}/" 2>/dev/null || true
-    cp "${OUTPUT_ROOT}/advanced/"*.txt "${EVIDENCE_DIR}/" 2>/dev/null || true
+    for f in "${OUTPUT_ROOT}/core"/*.txt "${OUTPUT_ROOT}/advanced"/*.txt; do
+        [ -f "${f}" ] || continue
+        file_has_meaningful_data "${f}" || continue
+        cp "${f}" "${EVIDENCE_DIR}/" 2>/dev/null || true
+    done
 
     echo -e "  ${WHITE}Evidence files:${RESET}"
-    ls -lh "${EVIDENCE_DIR}/" | awk '{print "    "$0}'
+    ls -lh "${EVIDENCE_DIR}/" | awk 'NR > 1 {print "    "$0}'
     echo ""
     success "Evidence archived → ${EVIDENCE_DIR}/"
 }
@@ -1028,6 +1616,7 @@ generate_report() {
 
     REPORT_FILE="${OUTPUT_ROOT}/reports/WISPER_REPORT_${SESSION_ID}_${SAFE_NAME}.txt"
     REPORT_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+    LLM_ANALYSIS_FILE=""
 
     echo -e "  ${DIM}Building final report...${RESET}"
     echo ""
@@ -1043,84 +1632,152 @@ generate_report() {
         echo "  Scan Start   : ${SESSION_START}"
         echo "  Report Date  : ${REPORT_DATE}"
         echo ""
+
+        # ── Asset counts ──
+        local sub_count=0 url_count=0 cert_count=0 dns_count=0
+        file_has_meaningful_data "${OUTPUT_ROOT}/core/01_subfinder.txt"  && sub_count=$(count_meaningful_lines "${OUTPUT_ROOT}/core/01_subfinder.txt")
+        file_has_meaningful_data "${OUTPUT_ROOT}/advanced/01_amass.txt"  && sub_count=$((sub_count + $(count_meaningful_lines "${OUTPUT_ROOT}/advanced/01_amass.txt")))
+        file_has_meaningful_data "${OUTPUT_ROOT}/core/06_waybackurls.txt" && url_count=$(count_meaningful_lines "${OUTPUT_ROOT}/core/06_waybackurls.txt")
+        file_has_meaningful_data "${OUTPUT_ROOT}/advanced/03_crtsh.txt"  && cert_count=$(count_meaningful_lines "${OUTPUT_ROOT}/advanced/03_crtsh.txt")
+        file_has_meaningful_data "${OUTPUT_ROOT}/core/03_dig_A.txt"      && dns_count=$(count_meaningful_lines "${OUTPUT_ROOT}/core/03_dig_A.txt")
+
         echo "──────────────────────────────────────────────────────────────────"
-        echo " EXECUTIVE SUMMARY"
+        echo " DISCOVERY SUMMARY"
         echo "──────────────────────────────────────────────────────────────────"
+        printf "  %-30s %s\n" "Subdomains discovered:"  "${sub_count}"
+        printf "  %-30s %s\n" "Historical URLs (Wayback):" "${url_count}"
+        printf "  %-30s %s\n" "Cert Transparency entries:" "${cert_count}"
+        printf "  %-30s %s\n" "DNS A record lines:"      "${dns_count}"
         echo ""
 
-        # Subdomains
-        echo "  [SUBDOMAINS]"
-        if [ -f "${OUTPUT_ROOT}/core/01_subfinder.txt" ]; then
-            echo "  Subfinder:"
-            sed 's/^/    /' "${OUTPUT_ROOT}/core/01_subfinder.txt"
-        fi
-        if [ -f "${OUTPUT_ROOT}/advanced/01_amass.txt" ]; then
-            echo "  Amass:"
-            sed 's/^/    /' "${OUTPUT_ROOT}/advanced/01_amass.txt" | head -30
-        fi
-
+        echo "──────────────────────────────────────────────────────────────────"
+        echo " 1. SUBDOMAINS"
+        echo "──────────────────────────────────────────────────────────────────"
         echo ""
-        echo "  [DNS RECORDS]"
+        if file_has_meaningful_data "${OUTPUT_ROOT}/core/01_subfinder.txt"; then
+            echo "  [Subfinder]"
+            grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED)' "${OUTPUT_ROOT}/core/01_subfinder.txt" | sed 's/^/    /'
+        fi
+        if file_has_meaningful_data "${OUTPUT_ROOT}/advanced/01_amass.txt"; then
+            echo ""
+            echo "  [Amass]"
+            grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED)' "${OUTPUT_ROOT}/advanced/01_amass.txt" | sed 's/^/    /'
+        fi
+        [[ "${sub_count}" -eq 0 ]] && echo "  No subdomains discovered."
+        echo ""
+
+        echo "──────────────────────────────────────────────────────────────────"
+        echo " 2. DNS RECORDS"
+        echo "──────────────────────────────────────────────────────────────────"
+        echo ""
         for rec in A MX NS TXT; do
             f="${OUTPUT_ROOT}/core/03_dig_${rec}.txt"
-            if [ -f "${f}" ] && [ -s "${f}" ]; then
-                echo "  ${rec}:"
-                sed 's/^/    /' "${f}"
+            if file_has_meaningful_data "${f}"; then
+                echo "  [${rec} Records]"
+                grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED)' "${f}" | sed 's/^/    /'
+                echo ""
             fi
         done
-
-        echo ""
-        echo "  [TECHNOLOGY STACK]"
-        if [ -f "${OUTPUT_ROOT}/core/07_whatweb.txt" ]; then
-            sed 's/^/    /' "${OUTPUT_ROOT}/core/07_whatweb.txt"
-        fi
-
-        echo ""
-        echo "  [HISTORICAL URLS — TOP 20]"
-        if [ -f "${OUTPUT_ROOT}/core/06_waybackurls.txt" ]; then
-            head -20 "${OUTPUT_ROOT}/core/06_waybackurls.txt" | sed 's/^/    /'
-        fi
-
-        echo ""
-        echo "  [WHOIS — KEY FIELDS]"
-        if [ -f "${OUTPUT_ROOT}/core/02_whois.txt" ]; then
-            grep -E "(Domain|Registrar|Name Server|Creation|Expiry|Email)" \
-                "${OUTPUT_ROOT}/core/02_whois.txt" 2>/dev/null | head -15 | sed 's/^/    /'
-        fi
-
-        if [ -f "${OUTPUT_ROOT}/advanced/03_crtsh.txt" ]; then
+        if file_has_meaningful_data "${OUTPUT_ROOT}/core/05_dnsrecon.txt"; then
+            echo "  [DNSRecon Output]"
+            grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED)' "${OUTPUT_ROOT}/core/05_dnsrecon.txt" | sed 's/^/    /'
             echo ""
-            echo "  [CERTIFICATE TRANSPARENCY — crt.sh]"
-            grep '"name_value"' "${OUTPUT_ROOT}/advanced/03_crtsh.txt" 2>/dev/null | \
-                sed 's/.*"name_value": "//;s/".*//' | sort -u | head -20 | sed 's/^/    /' || \
-                sed 's/^/    /' "${OUTPUT_ROOT}/advanced/03_crtsh.txt" | head -20
         fi
 
-        if [ -f "${OUTPUT_ROOT}/advanced/02_theharvester.txt" ]; then
-            echo ""
-            echo "  [theHarvester — EMAILS & HOSTS]"
-            grep -E "(\[.*\]|@)" "${OUTPUT_ROOT}/advanced/02_theharvester.txt" 2>/dev/null | \
-                head -20 | sed 's/^/    /' || \
-                head -20 "${OUTPUT_ROOT}/advanced/02_theharvester.txt" | sed 's/^/    /'
-        fi
-
-        echo ""
         echo "──────────────────────────────────────────────────────────────────"
-        echo " OUTPUT FILES"
+        echo " 3. WHOIS REGISTRATION"
+        echo "──────────────────────────────────────────────────────────────────"
+        echo ""
+        if file_has_meaningful_data "${OUTPUT_ROOT}/core/02_whois.txt"; then
+            grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED)' "${OUTPUT_ROOT}/core/02_whois.txt" | sed 's/^/    /'
+        else
+            echo "  No WHOIS data available."
+        fi
+        echo ""
+
+        echo "──────────────────────────────────────────────────────────────────"
+        echo " 4. TECHNOLOGY FINGERPRINTING"
+        echo "──────────────────────────────────────────────────────────────────"
+        echo ""
+        if file_has_meaningful_data "${OUTPUT_ROOT}/core/07_whatweb.txt"; then
+            grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED)' "${OUTPUT_ROOT}/core/07_whatweb.txt" | sed 's/^/    /'
+        else
+            echo "  WhatWeb: no response (host may be unreachable or HTTP fingerprint unavailable)."
+        fi
+        echo ""
+
+        echo "──────────────────────────────────────────────────────────────────"
+        echo " 5. CERTIFICATE TRANSPARENCY (crt.sh)"
+        echo "──────────────────────────────────────────────────────────────────"
+        echo ""
+        if file_has_meaningful_data "${OUTPUT_ROOT}/advanced/03_crtsh.txt"; then
+            grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED)' "${OUTPUT_ROOT}/advanced/03_crtsh.txt" | sed 's/^/    /'
+        else
+            echo "  No certificate transparency data (advanced profile only, or no results)."
+        fi
+        echo ""
+
+        echo "──────────────────────────────────────────────────────────────────"
+        echo " 6. EMAIL HARVESTING (theHarvester)"
+        echo "──────────────────────────────────────────────────────────────────"
+        echo ""
+        if file_has_meaningful_data "${OUTPUT_ROOT}/advanced/02_theharvester.txt"; then
+            grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED|\*\*\*)' "${OUTPUT_ROOT}/advanced/02_theharvester.txt" | sed 's/^/    /'
+        else
+            echo "  No theHarvester data (advanced profile only, or no results)."
+        fi
+        echo ""
+
+        echo "──────────────────────────────────────────────────────────────────"
+        echo " 7. HISTORICAL URLS (Wayback Machine)"
+        echo "──────────────────────────────────────────────────────────────────"
+        echo ""
+        if file_has_meaningful_data "${OUTPUT_ROOT}/core/06_waybackurls.txt"; then
+            echo "  Total: ${url_count} URLs found"
+            echo ""
+            echo "  [Potentially sensitive paths]"
+            grep -iE "(admin|login|panel|upload|backup|\.sql|\.bak|\.zip|debug|config|passwd|phpinfo|\.env|api)" \
+                "${OUTPUT_ROOT}/core/06_waybackurls.txt" 2>/dev/null | head -40 | sed 's/^/    /' || echo "    None matched."
+            echo ""
+            echo "  [All URLs — top 80]"
+            grep -vE '^(=+|[[:space:]]*$| TOOL| COMMAND| STARTED|\[ FINISHED)' "${OUTPUT_ROOT}/core/06_waybackurls.txt" | head -80 | sed 's/^/    /'
+        else
+            echo "  No Wayback URL data available."
+        fi
+        echo ""
+
+        echo "──────────────────────────────────────────────────────────────────"
+        echo " 8. OUTPUT FILES INDEX"
         echo "──────────────────────────────────────────────────────────────────"
         echo ""
         find "${OUTPUT_ROOT}" -name "*.txt" | sort | while read -r f; do
-            SIZE=$(wc -l < "${f}")
-            printf "  %-60s  %d lines\n" "${f}" "${SIZE}"
+            file_has_meaningful_data "${f}" || continue
+            SIZE=$(wc -l < "${f}" 2>/dev/null || echo 0)
+            printf "  %-65s  %4d lines\n" "${f}" "${SIZE}"
         done
 
         echo ""
         echo "──────────────────────────────────────────────────────────────────"
-        echo " END OF REPORT"
+        echo " END OF STATIC REPORT"
+        echo " AI threat analysis appended below if generated."
         echo " Generated by Wisper Alpha v1.0"
         echo "──────────────────────────────────────────────────────────────────"
 
     } | tee "${REPORT_FILE}"
+
+    echo ""
+    generate_optional_llm_analysis
+    if [[ -n "${LLM_ANALYSIS_FILE}" && -f "${LLM_ANALYSIS_FILE}" ]]; then
+        {
+            echo ""
+            echo "──────────────────────────────────────────────────────────────────"
+            echo " OPTIONAL AI THREAT ANALYSIS"
+            echo "──────────────────────────────────────────────────────────────────"
+            echo "  File: ${LLM_ANALYSIS_FILE}"
+            echo "  Provider: ${LLM_PROVIDER}"
+            echo "  Model: ${LLM_MODEL}"
+        } >> "${REPORT_FILE}"
+    fi
 
     echo ""
     success "Report generated → ${REPORT_FILE}"
@@ -1138,6 +1795,7 @@ generate_report() {
 main() {
     clear
     banner
+    bootstrap_tool_paths
 
     echo -e "  ${DIM}This script follows the Wisper Alpha recon flow:${RESET}"
     echo -e "  ${DIM}Session → Scope → Profile → Run → Dashboard → Inspect → Evidence → Report${RESET}"
