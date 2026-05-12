@@ -22,11 +22,21 @@ is_linux() {
     [[ "$(uname -s 2>/dev/null)" == "Linux" ]]
 }
 
+venv_dir() {
+    case "$(uname -s 2>/dev/null || echo unknown)" in
+        Linux*) echo ".venv-linux" ;;
+        MINGW*|MSYS*|CYGWIN*) echo ".venv-win" ;;
+        *) echo ".venv" ;;
+    esac
+}
+
 venv_python_path() {
-    if [[ -x ".venv/bin/python" ]]; then
-        echo ".venv/bin/python"
-    elif ! is_linux && [[ -x ".venv/Scripts/python.exe" ]]; then
-        echo ".venv/Scripts/python.exe"
+    local venv
+    venv="$(venv_dir)"
+    if [[ -x "${venv}/bin/python" ]]; then
+        echo "${venv}/bin/python"
+    elif ! is_linux && [[ -x "${venv}/Scripts/python.exe" ]]; then
+        echo "${venv}/Scripts/python.exe"
     else
         echo ""
     fi
@@ -51,10 +61,10 @@ test_backend() {
     py="$(choose_python)"
     [[ -n "${py}" ]] || return 1
     cd "${APP_BACKEND}"
-    if is_linux && [[ -d ".venv/Scripts" && ! -x ".venv/bin/python" ]]; then
-        rm -rf .venv
+    if is_linux && [[ -d ".venv/Scripts" ]]; then
+        echo "[WARN] Legacy Windows .venv detected; using .venv-linux for tests."
     fi
-    [[ -n "$(venv_python_path)" ]] || "${py}" -m venv .venv
+    [[ -n "$(venv_python_path)" ]] || "${py}" -m venv "$(venv_dir)"
     venv_py="$(venv_python_path)"
     [[ -n "${venv_py}" ]] || return 1
     "${venv_py}" -m pip install -r requirements.txt >/dev/null

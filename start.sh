@@ -23,11 +23,21 @@ is_linux() {
     [[ "$(uname -s 2>/dev/null)" == "Linux" ]]
 }
 
+venv_dir() {
+    case "$(uname -s 2>/dev/null || echo unknown)" in
+        Linux*) echo ".venv-linux" ;;
+        MINGW*|MSYS*|CYGWIN*) echo ".venv-win" ;;
+        *) echo ".venv" ;;
+    esac
+}
+
 venv_python_path() {
-    if [[ -x ".venv/bin/python" ]]; then
-        echo ".venv/bin/python"
-    elif ! is_linux && [[ -x ".venv/Scripts/python.exe" ]]; then
-        echo ".venv/Scripts/python.exe"
+    local venv
+    venv="$(venv_dir)"
+    if [[ -x "${venv}/bin/python" ]]; then
+        echo "${venv}/bin/python"
+    elif ! is_linux && [[ -x "${venv}/Scripts/python.exe" ]]; then
+        echo "${venv}/Scripts/python.exe"
     else
         echo ""
     fi
@@ -76,10 +86,10 @@ case "${choice}" in
         echo "Starting backend on http://localhost:8000 ..."
         (
             cd "${BACKEND_PATH}"
-            if is_linux && [[ -d ".venv/Scripts" && ! -x ".venv/bin/python" ]]; then
-                rm -rf .venv
+            if is_linux && [[ -d ".venv/Scripts" ]]; then
+                echo "Detected legacy Windows .venv. Using .venv-linux for backend."
             fi
-            [[ -n "$(venv_python_path)" ]] || "${PY_CMD}" -m venv .venv
+            [[ -n "$(venv_python_path)" ]] || "${PY_CMD}" -m venv "$(venv_dir)"
             VENV_PY="$(venv_python_path)"
             [[ -n "${VENV_PY}" ]] || { echo "Backend virtual environment is unavailable." >&2; exit 1; }
             "${VENV_PY}" -m pip install -r requirements.txt >/dev/null

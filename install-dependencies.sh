@@ -29,11 +29,21 @@ is_linux() {
     [[ "$(uname -s 2>/dev/null)" == "Linux" ]]
 }
 
+venv_dir() {
+    case "$(uname -s 2>/dev/null || echo unknown)" in
+        Linux*) echo ".venv-linux" ;;
+        MINGW*|MSYS*|CYGWIN*) echo ".venv-win" ;;
+        *) echo ".venv" ;;
+    esac
+}
+
 venv_python_path() {
-    if [[ -x ".venv/bin/python" ]]; then
-        echo ".venv/bin/python"
-    elif ! is_linux && [[ -x ".venv/Scripts/python.exe" ]]; then
-        echo ".venv/Scripts/python.exe"
+    local venv
+    venv="$(venv_dir)"
+    if [[ -x "${venv}/bin/python" ]]; then
+        echo "${venv}/bin/python"
+    elif ! is_linux && [[ -x "${venv}/Scripts/python.exe" ]]; then
+        echo "${venv}/Scripts/python.exe"
     else
         echo ""
     fi
@@ -109,11 +119,10 @@ if [[ -z "${PY_CMD}" ]]; then
 else
     step "Installing backend dependencies"
     cd "${BACKEND_DIR}"
-    if is_linux && [[ -d ".venv/Scripts" && ! -x ".venv/bin/python" ]]; then
-        warn "Detected a Windows virtualenv in Linux path. Recreating .venv for Linux."
-        rm -rf .venv
+    if is_linux && [[ -d ".venv/Scripts" ]]; then
+        warn "Detected legacy Windows .venv. Using isolated Linux env at .venv-linux."
     fi
-    [[ -n "$(venv_python_path)" ]] || "${PY_CMD}" -m venv .venv
+    [[ -n "$(venv_python_path)" ]] || "${PY_CMD}" -m venv "$(venv_dir)"
     VENV_PY="$(venv_python_path)"
     [[ -n "${VENV_PY}" ]] || { warn "Python virtual environment is unavailable."; add_missing "python-venv"; exit 1; }
     "${VENV_PY}" -m pip install --upgrade pip

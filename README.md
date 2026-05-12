@@ -61,6 +61,8 @@ bash ./install-dependencies.sh
 
 Recommended for best stability: clone and run the project inside native Linux filesystem (e.g., `~/wisper-linux`) instead of `/mnt/d/...`.
 
+Note: project scripts now isolate environments by shell platform (`.venv-linux` on Linux, `.venv-win` on Git Bash/Windows), so locked legacy `.venv` folders are ignored.
+
 ## Web endpoints
 
 - Frontend: `http://localhost:5173`
