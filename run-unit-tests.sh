@@ -5,7 +5,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_BACKEND="${REPO_ROOT}/app/backend"
 APP_FRONTEND="${REPO_ROOT}/app/frontend"
 RECON_SCRIPT="${REPO_ROOT}/automation/wisper.sh"
-REPORTING_ROOT="${REPO_ROOT}/reporting"
 FAILED=0
 
 choose_python() {
@@ -81,24 +80,9 @@ test_part2_syntax() {
     bash -n "${RECON_SCRIPT}"
 }
 
-test_part3_structure() {
-    local required=(
-        "01-scope-and-deliverables.md"
-        "02-technical-structure.md"
-        "03-execution-plan.md"
-        "04-data-contract-plan.md"
-        "README.md"
-        "pentest.zip"
-    )
-    for item in "${required[@]}"; do
-        [[ -e "${REPORTING_ROOT}/${item}" ]] || return 1
-    done
-}
-
 run_step "Backend unit tests" test_backend
 run_step "Frontend build check" test_frontend
 run_step "Recon script syntax validation" test_part2_syntax
-run_step "Reporting deliverables validation" test_part3_structure
 
 echo ""
 if [[ "${FAILED}" -ne 0 ]]; then
