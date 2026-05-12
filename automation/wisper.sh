@@ -203,7 +203,7 @@ dependency_audit() {
         print_dep_status "spiderfoot" "fallback" "python -m spiderfoot"
     else
         print_dep_status "spiderfoot" "missing" "advanced profile optional"
-        record_hard_missing_tool "spiderfoot"
+        record_missing_tool "spiderfoot"
     fi
     if has_cmd recon-ng; then
         print_dep_status "recon-ng" "ok" ""
@@ -485,8 +485,9 @@ install_tools() {
 
     step "Installing SpiderFoot (OSINT aggregation)..."
     if ! command -v spiderfoot &>/dev/null && ! python_module_entry_works "spiderfoot"; then
-        [[ -n "${pip_cmd}" ]] && ${pip_cmd} install --break-system-packages spiderfoot 2>/dev/null || \
-        warn "SpiderFoot install failed — try: pip3 install spiderfoot"
+        install_with_system_manager "spiderfoot" || true
+        command -v spiderfoot &>/dev/null || python_module_entry_works "spiderfoot" || \
+        warn "SpiderFoot is not available via direct pip install in many environments; use distro package, Docker, or source install."
     else
         success "SpiderFoot already installed"
     fi

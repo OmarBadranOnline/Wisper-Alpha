@@ -101,7 +101,17 @@ else
     [[ -n "${VENV_PY}" ]] || { warn "Python virtual environment is unavailable."; add_missing "python-venv"; exit 1; }
     "${VENV_PY}" -m pip install --upgrade pip
     "${VENV_PY}" -m pip install -r requirements.txt
-    "${VENV_PY}" -m pip install dnsrecon theHarvester spiderfoot
+    "${VENV_PY}" -m pip install dnsrecon theHarvester
+    if command -v spiderfoot >/dev/null 2>&1 || "${VENV_PY}" -m spiderfoot --help >/dev/null 2>&1; then
+        ok "spiderfoot available"
+    else
+        step "Installing SpiderFoot (optional advanced tool)"
+        install_with_system_manager "spiderfoot" || true
+        if ! command -v spiderfoot >/dev/null 2>&1 && ! "${VENV_PY}" -m spiderfoot --help >/dev/null 2>&1; then
+            warn "SpiderFoot is not available via direct pip install in many environments."
+            warn "Install SpiderFoot via distro package, Docker, or source if you need advanced aggregation."
+        fi
+    fi
     if ! "${VENV_PY}" -m pip install recon-ng; then
         warn "recon-ng not available from current PyPI index; trying Git source."
         "${VENV_PY}" -m pip install git+https://github.com/lanmaster53/recon-ng.git || warn "Failed to install recon-ng from Git."
