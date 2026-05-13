@@ -69,6 +69,18 @@ has_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Ensure Go-installed tools (subfinder, httpx, dnsx, nuclei, gau, etc.) are
+# always found even if a system package shadows them (e.g. Kali python3-httpx)
+_setup_go_path() {
+    local gopath
+    gopath="$(go env GOPATH 2>/dev/null || echo "${HOME}/go")"
+    case ":${PATH}:" in
+        *":${gopath}/bin:"*) ;; # already in PATH
+        *) export PATH="${gopath}/bin:${PATH}" ;;
+    esac
+}
+has_cmd go && _setup_go_path
+
 detect_python() {
     if has_cmd python3; then
         echo "python3"
@@ -198,6 +210,7 @@ dependency_audit() {
         record_hard_missing_tool "dnsrecon"
     fi
     if has_cmd waybackurls; then print_dep_status "waybackurls" "ok" ""; else print_dep_status "waybackurls" "missing" "historical URL collection"; record_hard_missing_tool "waybackurls"; fi
+    if has_cmd gau; then print_dep_status "gau" "ok" ""; else print_dep_status "gau" "missing" "multi-source URL collection (optional)"; fi
     if has_cmd whatweb; then
         print_dep_status "whatweb" "ok" ""
     elif has_cmd curl; then
@@ -206,6 +219,9 @@ dependency_audit() {
         print_dep_status "whatweb" "missing" "technology fingerprinting"
         record_hard_missing_tool "whatweb"
     fi
+    if has_cmd httpx; then print_dep_status "httpx" "ok" ""; else print_dep_status "httpx" "missing" "live host probing (optional)"; fi
+    if has_cmd dnsx; then print_dep_status "dnsx" "ok" ""; else print_dep_status "dnsx" "missing" "subdomain DNS validation (optional)"; fi
+    if has_cmd nuclei; then print_dep_status "nuclei" "ok" ""; else print_dep_status "nuclei" "missing" "passive vuln templates (optional)"; fi
     if has_cmd amass; then print_dep_status "amass" "ok" ""; else print_dep_status "amass" "missing" "advanced profile"; record_hard_missing_tool "amass"; fi
     if has_cmd theHarvester; then
         print_dep_status "theHarvester" "ok" ""
@@ -221,7 +237,6 @@ dependency_audit() {
         print_dep_status "spiderfoot" "fallback" "python -m spiderfoot"
     else
         print_dep_status "spiderfoot" "missing" "advanced profile optional"
-        record_missing_tool "spiderfoot"
     fi
     if has_cmd recon-ng; then
         print_dep_status "recon-ng" "ok" ""
@@ -573,10 +588,14 @@ build_llm_prompt_context() {
         append_meaningful_excerpt "DNS TXT records" "${OUTPUT_ROOT}/core/03_dig_TXT.txt" 40
         append_meaningful_excerpt "nslookup" "${OUTPUT_ROOT}/core/04_nslookup.txt" 40
         append_meaningful_excerpt "DNSRecon full output" "${OUTPUT_ROOT}/core/05_dnsrecon.txt" 120
-        append_meaningful_excerpt "Wayback historical URLs" "${OUTPUT_ROOT}/core/06_waybackurls.txt" 250
+        append_meaningful_excerpt "Wayback historical URLs" "${OUTPUT_ROOT}/core/06_waybackurls.txt" 200
+        append_meaningful_excerpt "gau multi-source URLs" "${OUTPUT_ROOT}/core/06b_gau.txt" 100
         append_meaningful_excerpt "WhatWeb technology fingerprints" "${OUTPUT_ROOT}/core/07_whatweb.txt" 80
         append_meaningful_excerpt "crt.sh certificate transparency" "${OUTPUT_ROOT}/advanced/03_crtsh.txt" 100
         append_meaningful_excerpt "theHarvester emails and hosts" "${OUTPUT_ROOT}/advanced/02_theharvester.txt" 100
+        append_meaningful_excerpt "dnsx DNS validation results" "${OUTPUT_ROOT}/advanced/06_dnsx.txt" 80
+        append_meaningful_excerpt "httpx live host probe" "${OUTPUT_ROOT}/advanced/07_httpx.txt" 100
+        append_meaningful_excerpt "nuclei passive findings" "${OUTPUT_ROOT}/advanced/08_nuclei.txt" 120
         append_meaningful_excerpt "Shodan host data" "${OUTPUT_ROOT}/advanced/04_shodan.txt" 60
     } > "${prompt_file}"
 }
@@ -1023,8 +1042,40 @@ install_tools() {
         else
             success "waybackurls already installed"
         fi
+
+        step "Installing gau (multi-source URL aggregation)..."
+        if ! command -v gau &>/dev/null; then
+            go install -v github.com/lc/gau/v2/cmd/gau@latest \
+                2>/dev/null || warn "gau install failed — try: go install github.com/lc/gau/v2/cmd/gau@latest"
+        else
+            success "gau already installed"
+        fi
+
+        step "Installing httpx (live host probing)..."
+        if ! command -v httpx &>/dev/null; then
+            go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest \
+                2>/dev/null || warn "httpx install failed — try: go install github.com/projectdiscovery/httpx/cmd/httpx@latest"
+        else
+            success "httpx already installed"
+        fi
+
+        step "Installing dnsx (DNS resolution & validation)..."
+        if ! command -v dnsx &>/dev/null; then
+            go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest \
+                2>/dev/null || warn "dnsx install failed — try: go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest"
+        else
+            success "dnsx already installed"
+        fi
+
+        step "Installing nuclei (vulnerability templates)..."
+        if ! command -v nuclei &>/dev/null; then
+            go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest \
+                2>/dev/null || warn "nuclei install failed — try: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+        else
+            success "nuclei already installed"
+        fi
     else
-        warn "Go is not installed — skipping go-based tool installs (subfinder/amass/waybackurls)"
+        warn "Go is not installed — skipping go-based tool installs (subfinder/amass/waybackurls/gau/httpx/dnsx/nuclei)"
     fi
 
     step "Installing WhatWeb (technology fingerprinting)..."
@@ -1238,6 +1289,15 @@ run_core() {
         warn "waybackurls not found — skipping"
     fi
 
+    # ── 6b. gau (multi-source URL aggregation) ──
+    if command -v gau &>/dev/null; then
+        run_tool "gau (multi-source URLs)" \
+            "${OUT}/06b_gau.txt" 120 \
+            bash -c "gau --threads 5 --blacklist png,jpg,gif,svg,ico,css,woff,woff2,ttf '${TARGET_DOMAIN}' 2>/dev/null"
+    else
+        warn "gau not found — skipping (install: go install github.com/lc/gau/v2/cmd/gau@latest)"
+    fi
+
     # ── 7. WhatWeb ──
     if command -v whatweb &>/dev/null; then
         run_tool "WhatWeb" \
@@ -1318,6 +1378,12 @@ run_advanced() {
             bash -c "echo '${TARGET_DOMAIN}' | waybackurls"
     fi
 
+    # gau enriches the URL dataset further
+    if command -v gau &>/dev/null; then
+        run_tool "gau (URL enrichment)" "${CORE_OUT}/06b_gau.txt" 120 \
+            bash -c "gau --threads 5 --blacklist png,jpg,gif,svg,ico,css,woff,woff2,ttf '${TARGET_DOMAIN}' 2>/dev/null"
+    fi
+
     if command -v whatweb &>/dev/null; then
         run_tool "WhatWeb" "${CORE_OUT}/07_whatweb.txt" 120 \
             whatweb "https://${TARGET_DOMAIN}" --color=never
@@ -1388,12 +1454,62 @@ run_advanced() {
     } > "${OUT}/05_censys_manual.txt" || true
     cat "${OUT}/05_censys_manual.txt" || true
 
+    # ── Phase C: Enrichment — dnsx, httpx, nuclei ──
+    echo ""
+    step "Phase C: Running enrichment tools (dnsx / httpx / nuclei)..."
+    echo ""
+
+    # Build a combined subdomain list from subfinder + amass
+    local SUBLIST="${OUT}/00_combined_subdomains.txt"
+    {
+        [[ -f "${OUT}/01_amass.txt" ]]      && grep -vE '^(=+|[[:space:]]*$)' "${OUT}/01_amass.txt" 2>/dev/null || true
+        [[ -f "${CORE_OUT}/01_subfinder.txt" ]] && grep -vE '^(=+|[[:space:]]*$)' "${CORE_OUT}/01_subfinder.txt" 2>/dev/null || true
+    } | sort -u > "${SUBLIST}" || true
+
+    # dnsx: validate which subdomains actually resolve
+    if command -v dnsx &>/dev/null && [[ -s "${SUBLIST}" ]]; then
+        run_tool "dnsx (DNS validation)" \
+            "${OUT}/06_dnsx.txt" 120 \
+            bash -c "dnsx -l '${SUBLIST}' -a -resp -silent 2>/dev/null"
+    elif ! command -v dnsx &>/dev/null; then
+        warn "dnsx not found — skipping (install: go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest)"
+    else
+        warn "dnsx: subdomain list empty — skipping"
+    fi
+
+    # httpx: probe live hosts — status, title, tech, redirect
+    if command -v httpx &>/dev/null && [[ -s "${SUBLIST}" ]]; then
+        run_tool "httpx (live host probe)" \
+            "${OUT}/07_httpx.txt" 180 \
+            bash -c "httpx -l '${SUBLIST}' -silent -status-code -title -tech-detect -follow-redirects -threads 20 2>/dev/null"
+    elif ! command -v httpx &>/dev/null; then
+        warn "httpx not found — skipping (install: go install github.com/projectdiscovery/httpx/cmd/httpx@latest)"
+    else
+        warn "httpx: subdomain list empty — skipping"
+    fi
+
+    # nuclei: passive/safe templates only — no active exploitation
+    if command -v nuclei &>/dev/null && [[ -s "${SUBLIST}" ]]; then
+        run_tool "nuclei (passive templates)" \
+            "${OUT}/08_nuclei.txt" 300 \
+            bash -c "nuclei -l '${SUBLIST}' -silent \
+                -tags exposure,misconfig,headers,ssl,tech,info,takeover \
+                -severity info,low,medium \
+                -rate-limit 20 \
+                2>/dev/null || true"
+    elif ! command -v nuclei &>/dev/null; then
+        warn "nuclei not found — skipping (install: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest)"
+    else
+        warn "nuclei: subdomain list empty — skipping"
+    fi
+
     # SpiderFoot CLI (if available)
     if command -v spiderfoot &>/dev/null; then
         warn "SpiderFoot detected — run interactively: spiderfoot -l 127.0.0.1:5001"
         echo "SpiderFoot available. Run interactively with: spiderfoot -l 127.0.0.1:5001" \
-            > "${OUT}/06_spiderfoot_note.txt" || true
+            > "${OUT}/09_spiderfoot_note.txt" || true
     fi
+
 
     # Recon-ng note
     if command -v recon-ng &>/dev/null; then
