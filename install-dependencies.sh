@@ -58,6 +58,18 @@ run_quick_check() {
     fi
 }
 
+# Prepend GOPATH/bin so Go tools (httpx, dnsx, nuclei, gau) take priority
+# over any system package with the same name (e.g. Kali python3-httpx)
+_ensure_go_path() {
+    local gopath
+    gopath="$(go env GOPATH 2>/dev/null || echo "${HOME}/go")"
+    case ":${PATH}:" in
+        *":${gopath}/bin:"*) ;;
+        *) export PATH="${gopath}/bin:${PATH}" ;;
+    esac
+}
+command -v go >/dev/null 2>&1 && _ensure_go_path
+
 ensure_cmd() {
     local name="$1"
     if command -v "${name}" >/dev/null 2>&1; then
@@ -158,15 +170,24 @@ if command -v go >/dev/null 2>&1; then
     go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
     go install github.com/owasp-amass/amass/v4/...@master
     go install github.com/tomnomnom/waybackurls@latest
+    go install github.com/lc/gau/v2/cmd/gau@latest
+    go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+    go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+    go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 else
-    warn "Go missing; subfinder/amass/waybackurls were not installed."
+    warn "Go missing; subfinder/amass/waybackurls/gau/httpx/dnsx/nuclei were not installed."
     add_missing "go"
     add_missing "subfinder"
     add_missing "amass"
     add_missing "waybackurls"
+    add_missing "gau"
+    add_missing "httpx"
+    add_missing "dnsx"
+    add_missing "nuclei"
 fi
 
 step "Verifying key tools"
+GOBIN="$(go env GOPATH 2>/dev/null || echo "${HOME}/go")/bin"
 for cmd in \
     "python3 --version || python --version" \
     "node --version" \
@@ -174,17 +195,32 @@ for cmd in \
     "go version" \
     "subfinder -version" \
     "amass -version" \
-    "waybackurls --help"; do
+    "waybackurls --help" \
+    "gau --version" \
+    "dnsx -version" \
+    "nuclei -version"; do
     if run_quick_check "${cmd}"; then
         ok "${cmd}"
     else
         warn "Failed: ${cmd}"
-        [[ "${cmd}" == go* ]] && add_missing "go"
-        [[ "${cmd}" == subfinder* ]] && add_missing "subfinder"
-        [[ "${cmd}" == amass* ]] && add_missing "amass"
+        [[ "${cmd}" == go* ]]          && add_missing "go"
+        [[ "${cmd}" == subfinder* ]]   && add_missing "subfinder"
+        [[ "${cmd}" == amass* ]]       && add_missing "amass"
         [[ "${cmd}" == waybackurls* ]] && add_missing "waybackurls"
+        [[ "${cmd}" == gau* ]]         && add_missing "gau"
+        [[ "${cmd}" == dnsx* ]]        && add_missing "dnsx"
+        [[ "${cmd}" == nuclei* ]]      && add_missing "nuclei"
     fi
 done
+
+# httpx: verify via full GOPATH path to avoid conflict with Kali python3-httpx
+if [[ -x "${GOBIN}/httpx" ]]; then
+    ok "httpx (projectdiscovery) installed at ${GOBIN}/httpx"
+else
+    warn "httpx (projectdiscovery) not found at ${GOBIN}/httpx"
+    warn "Install manually: go install github.com/projectdiscovery/httpx/cmd/httpx@latest"
+    warn "Note: apt 'httpx' is a Python tool, not the ProjectDiscovery scanner."
+fi
 
 cd "${REPO_ROOT}"
 ok "Dependency bootstrap finished"
