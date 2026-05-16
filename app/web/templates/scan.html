@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}New Scan — Wisper Alpha v2{% endblock %}
+{% block content %}
+
+<header class="ws-page-hd anim-up">
+  <div>
+    <div class="ws-crumb">Wizard</div>
+    <h1 class="ws-h1">New Reconnaissance Scan</h1>
+  </div>
+</header>
+
+{% if error %}
+<div class="ws-error anim-up">{{ error }}</div>
+{% endif %}
+
+<div class="ws-guide anim-up">
+  <div class="ws-guide-hd">
+    <h3 class="ws-h4">Scan Configuration</h3>
+    <span class="ws-caps" id="step-label">Step 1 of 3</span>
+  </div>
+
+  <!-- Progress bar -->
+  <div style="display:flex;gap:6px;margin-bottom:28px;" id="progress-bar">
+    <div class="prog-seg active" style="flex:1;height:4px;border-radius:2px;background:var(--brand-cyan-500);transition:background .3s ease;"></div>
+    <div class="prog-seg" style="flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,.1);transition:background .3s ease;"></div>
+    <div class="prog-seg" style="flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,.1);transition:background .3s ease;"></div>
+  </div>
+
+  <form method="POST" action="/scan" id="scan-form">
+
+    <!-- Step 1: Target -->
+    <div id="step-1">
+      <h4 class="ws-h5" style="margin-bottom:20px;">Select Target</h4>
+
+      <div class="ws-field">
+        <label>Target Domain or URL</label>
+        <input class="ws-input" type="text" id="target" name="target"
+               placeholder="example.com  or  https://example.com:8080"
+               autocomplete="off" />
+        <p class="ws-small" style="margin-top:8px;">Port and scheme are stripped automatically.</p>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:28px;">
+        <button type="button" class="btn btn-primary" onclick="goStep(2)">Continue →</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Profile -->
+    <div id="step-2" style="display:none;">
+      <h4 class="ws-h5" style="margin-bottom:20px;">Reconnaissance Profile</h4>
+
+      <div class="ws-field">
+        <label>Scan Profile</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;" id="profile-cards">
+          <div class="profile-card active" data-val="core-passive" onclick="selectProfile(this)" style="cursor:pointer;padding:18px;border-radius:12px;border:1px solid var(--brand-cyan-500);background:rgba(74,175,217,.1);transition:all .2s ease;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span class="ws-h5" style="color:var(--brand-cyan-400);">Core Passive</span>
+              <span class="profile-check" style="color:var(--brand-cyan-400);">✓</span>
+            </div>
+            <p class="ws-small" style="margin:0;">Subdomains, DNS, WHOIS, basic tech (1-2 min).</p>
+          </div>
+          <div class="profile-card" data-val="advanced-deep-passive" onclick="selectProfile(this)" style="cursor:pointer;padding:18px;border-radius:12px;border:1px solid var(--border-default);background:rgba(0,0,0,.2);transition:all .2s ease;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span class="ws-h5">Advanced Deep</span>
+              <span class="profile-check" style="display:none;color:var(--brand-cyan-400);">✓</span>
+            </div>
+            <p class="ws-small" style="margin:0;">Adds email harvesting, historical URLs, vuln scanning.</p>
+          </div>
+        </div>
+        <input type="hidden" name="profile" id="profile-hidden" value="core-passive" />
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:28px;">
+        <button type="button" class="btn btn-ghost" onclick="goStep(1)">← Back</button>
+        <button type="button" class="btn btn-primary" onclick="goStep(3)">Review Setup →</button>
+      </div>
+    </div>
+
+    <!-- Step 3: AI + Launch -->
+    <div id="step-3" style="display:none;">
+      <h4 class="ws-h5" style="margin-bottom:20px;">Review & Launch</h4>
+
+      <!-- Summary panel -->
+      <div class="ws-glass" style="border-radius:12px;padding:20px;margin-bottom:20px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <div>
+            <span class="ws-caps">Target</span>
+            <div class="ws-h4 ws-mono" style="margin-top:8px;color:var(--brand-cyan-400);" id="review-target">—</div>
+          </div>
+          <div>
+            <span class="ws-caps">Profile</span>
+            <div class="ws-h4" style="margin-top:8px;color:var(--brand-cyan-400);text-transform:capitalize;" id="review-profile">core-passive</div>
+          </div>
+        </div>
+      </div>
+
+      <hr class="ws-hr" />
+      <p class="ws-caps" style="margin-bottom:16px;">AI Report (Optional)</p>
+
+      <div class="ws-field">
+        <div class="ws-checkbox-row">
+          <input type="checkbox" id="ai_report" name="ai_report" />
+          <label for="ai_report" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400;color:var(--fg2);">Generate AI threat analysis (Requires .env with GEMINI_API_KEY in root folder)</label>
+        </div>
+      </div>
+
+      <div class="ws-note">
+        <span style="color:var(--brand-cyan-400);font-weight:600;">Note:</span>
+        Launching this scan will initialize a new background reconnaissance process orchestrated by the Wisper engine. You will be redirected to the live terminal console.
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:28px;">
+        <button type="button" class="btn btn-ghost" onclick="goStep(2)">← Back</button>
+        <button type="submit" class="btn btn-accent" id="launch-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Initialize Orchestrator
+        </button>
+      </div>
+    </div>
+
+  </form>
+</div>
+
+<script>
+  let currentStep = 1;
+
+  function goStep(n) {
+    const targetEl = document.getElementById('target');
+    if (n > 1 && !targetEl.value.trim()) {
+      targetEl.focus();
+      targetEl.style.borderColor = '#FF7A8A';
+      return;
+    }
+    targetEl.style.borderColor = '';
+
+    // Update review panel
+    if (n === 3) {
+      document.getElementById('review-target').textContent = targetEl.value.trim() || '—';
+      document.getElementById('review-profile').textContent = document.getElementById('profile-hidden').value;
+    }
+
+    document.getElementById('step-' + currentStep).style.display = 'none';
+    document.getElementById('step-' + n).style.display = '';
+    currentStep = n;
+
+    document.getElementById('step-label').textContent = 'Step ' + n + ' of 3';
+
+    const segs = document.querySelectorAll('.prog-seg');
+    segs.forEach((s, i) => {
+      s.style.background = i < n ? 'var(--brand-cyan-500)' : 'rgba(255,255,255,.1)';
+    });
+  }
+
+  function selectProfile(card) {
+    document.querySelectorAll('.profile-card').forEach(c => {
+      c.style.border = '1px solid var(--border-default)';
+      c.style.background = 'rgba(0,0,0,.2)';
+      c.querySelector('.profile-check').style.display = 'none';
+      c.querySelector('.ws-h5').style.color = '';
+    });
+    card.style.border = '1px solid var(--brand-cyan-500)';
+    card.style.background = 'rgba(74,175,217,.1)';
+    card.querySelector('.profile-check').style.display = '';
+    card.querySelector('.ws-h5').style.color = 'var(--brand-cyan-400)';
+    document.getElementById('profile-hidden').value = card.dataset.val;
+  }
+
+  // Toggle model dropdown
+  const aiBox = document.getElementById('ai_report');
+  const modelGroup = document.getElementById('model-group');
+  function toggleModel() { modelGroup.style.display = aiBox.checked ? '' : 'none'; }
+  aiBox.addEventListener('change', toggleModel);
+  toggleModel();
+
+  // Submit feedback
+  document.getElementById('scan-form').addEventListener('submit', () => {
+    const btn = document.getElementById('launch-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;"></span> Launching…';
+  });
+
+  // Add spin keyframe inline
+  const style = document.createElement('style');
+  style.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
+  document.head.appendChild(style);
+</script>
+{% endblock %}

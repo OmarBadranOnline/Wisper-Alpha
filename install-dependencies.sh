@@ -58,8 +58,6 @@ run_quick_check() {
     fi
 }
 
-# Prepend GOPATH/bin so Go tools (httpx, dnsx, nuclei, gau) take priority
-# over any system package with the same name (e.g. Kali python3-httpx)
 _ensure_go_path() {
     local gopath
     gopath="$(go env GOPATH 2>/dev/null || echo "${HOME}/go")"
@@ -213,13 +211,60 @@ for cmd in \
     fi
 done
 
-# httpx: verify via full GOPATH path to avoid conflict with Kali python3-httpx
+
 if [[ -x "${GOBIN}/httpx" ]]; then
     ok "httpx (projectdiscovery) installed at ${GOBIN}/httpx"
 else
     warn "httpx (projectdiscovery) not found at ${GOBIN}/httpx"
     warn "Install manually: go install github.com/projectdiscovery/httpx/cmd/httpx@latest"
     warn "Note: apt 'httpx' is a Python tool, not the ProjectDiscovery scanner."
+fi
+
+step "Installing Wisper  Web GUI dependencies (Flask + pipeline)"
+
+if [[ -z "${PY_CMD}" ]]; then
+    warn "Python not found — skipping wisper-v2 dependency install."
+    add_missing "python3-for-wisper-v2"
+else
+    APP_WEB_DIR="${REPO_ROOT}/app/web"
+    APP_WEB_REQ="${APP_WEB_DIR}/requirements.txt"
+    APP_WEB_VENV="${APP_WEB_DIR}/.venv"
+
+    if [[ ! -f "${APP_WEB_REQ}" ]]; then
+        warn "requirements.txt not found at ${APP_WEB_REQ} — skipping."
+    else
+        if [[ ! -d "${APP_WEB_VENV}" ]]; then
+            ok "Creating isolated venv for Web GUI at ${APP_WEB_VENV}"
+            "${PY_CMD}" -m venv "${APP_WEB_VENV}"
+        else
+            ok "Reusing existing Web GUI venv at ${APP_WEB_VENV}"
+        fi
+
+        if [[ -x "${APP_WEB_VENV}/bin/python" ]]; then
+            W1_PY="${APP_WEB_VENV}/bin/python"
+        elif [[ -x "${APP_WEB_VENV}/Scripts/python.exe" ]]; then
+            W1_PY="${APP_WEB_VENV}/Scripts/python.exe"
+        else
+            W1_PY="${PY_CMD}"
+            warn "Could not find venv Python — falling back to system ${PY_CMD}"
+        fi
+
+        ok "Upgrading pip inside Web GUI venv"
+        "${W1_PY}" -m pip install --upgrade pip --quiet
+
+        ok "Installing Web GUI requirements (Flask)"
+        "${W1_PY}" -m pip install -r "${APP_WEB_REQ}" --quiet
+
+
+        if "${W1_PY}" -c "import flask; print('[OK] Flask', flask.__version__)" 2>/dev/null; then
+            ok "Flask OK"
+        else
+            warn "Flask import failed after install — check pip output above."
+            add_missing "flask"
+        fi
+
+        ok "Wisper Web GUI Python environment ready — launch with: bash start.sh (option 1)"
+    fi
 fi
 
 cd "${REPO_ROOT}"

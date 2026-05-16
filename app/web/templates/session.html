@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}{{ session.target_domain }} — Wisper Alpha{% endblock %}
+{% block content %}
+
+<header class="ws-page-hd anim-up">
+  <div>
+    <div class="ws-crumb">
+      <a href="/" style="color:var(--brand-cyan-600);">← Dashboard</a>
+      &nbsp;·&nbsp; Session detail
+    </div>
+    <h1 class="ws-h1">{{ session.target_domain }}</h1>
+    <p class="ws-small ws-mono" style="margin-top:8px;color:var(--fg3);">{{ session.id }}</p>
+  </div>
+  <div class="ws-hd-actions">
+    {% if session.status in ['done','completed'] %}<span class="chip chip-success"><span class="chip-dot"></span>completed</span>
+    {% elif session.status == 'running' %}<span class="chip chip-cyan"><span class="chip-dot"></span>running</span>
+    {% elif session.status == 'error' %}<span class="chip chip-danger"><span class="chip-dot"></span>error</span>
+    {% else %}<span class="chip chip-neutral"><span class="chip-dot"></span>{{ session.status }}</span>{% endif %}
+    <span class="chip chip-neutral">{{ session.profile }}</span>
+  </div>
+</header>
+
+<!-- Stats -->
+<div class="ws-stats anim-up">
+  {% for cat, items in findings.items() %}
+  <div class="ws-stat">
+    <div class="ws-stat-lbl">{{ cat }}</div>
+    <div class="ws-stat-num accent">{{ items|length }}</div>
+  </div>
+  {% else %}
+  <div class="ws-stat">
+    <div class="ws-stat-lbl">Findings</div>
+    <div class="ws-stat-num ws-muted">0</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Session meta -->
+<div class="ws-panel anim-up" style="margin-bottom:24px;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;">
+    <div>
+      <span class="ws-caps">Session ID</span>
+      <div class="ws-mono" style="margin-top:6px;font-size:.8rem;color:var(--fg2);">{{ session.id }}</div>
+    </div>
+    <div>
+      <span class="ws-caps">Target</span>
+      <div class="ws-mono" style="margin-top:6px;font-size:.9rem;color:var(--brand-cyan-400);">{{ session.target_domain }}</div>
+    </div>
+    <div>
+      <span class="ws-caps">Started</span>
+      <div class="ws-mono" style="margin-top:6px;font-size:.85rem;color:var(--fg2);">{{ session.started_at or '—' }}</div>
+    </div>
+    <div>
+      <span class="ws-caps">Output Folder</span>
+      <div class="ws-mono" style="margin-top:6px;font-size:.78rem;color:var(--fg3);word-break:break-all;">{{ session.folder }}</div>
+    </div>
+  </div>
+</div>
+
+{% if reports %}
+<!-- Reports quick-links -->
+<div class="ws-panel anim-up" style="margin-bottom:24px;padding:16px 24px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+    <div>
+      <h4 class="ws-h5">Generated Reports</h4>
+      <p class="ws-small" style="margin-top:4px;">{{ reports|length }} report file(s) in <code class="inline">reports/</code></p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      {% for r in reports %}
+      <a href="/session/{{ session.id }}/reports/{{ r.name }}" target="_blank" class="btn btn-ghost" style="padding:6px 14px;font-size:.8rem;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        {{ r.name[:40] }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Tabs -->
+{% if findings %}
+<div class="ws-tabs anim-up">
+  {% for cat in findings.keys() %}
+  <a class="ws-tab" href="#{{ loop.index }}" onclick="showTab('{{ loop.index }}',this);return false;">
+    {{ cat }}
+    <span style="margin-left:6px;background:rgba(255,255,255,.07);padding:1px 7px;border-radius:999px;font-size:.75rem;">{{ findings[cat]|length }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+<!-- Finding panels -->
+{% for cat, items in findings.items() %}
+<div id="tab-{{ loop.index }}" class="tab-panel" style="display:{% if loop.first %}block{% else %}none{% endif %};">
+  <div class="ws-panel" style="padding:0;overflow:hidden;">
+    <table class="ws-tbl">
+      <thead>
+        <tr>
+          <th style="width:40px;">#</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in items %}
+      <tr>
+        <td class="ws-muted" style="font-size:.75rem;">{{ loop.index }}</td>
+        <td><code>{{ item[:120] }}</code></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+  function showTab(name, clicked) {
+    document.querySelectorAll('.tab-panel').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.ws-tab').forEach(el => el.classList.remove('active'));
+    const panel = document.getElementById('tab-' + name);
+    if (panel) panel.style.display = '';
+    if (clicked) clicked.classList.add('active');
+  }
+  // Activate first tab
+  const firstTab = document.querySelector('.ws-tab');
+  if (firstTab) firstTab.classList.add('active');
+</script>
+
+{% else %}
+<div class="ws-panel anim-up" style="text-align:center;padding:48px;">
+  <p class="ws-body" style="color:var(--fg4);">No parsed findings yet. Scan may still be running, or output files are empty.</p>
+</div>
+{% endif %}
+
+<script>
+  document.getElementById('scope-target').textContent = '{{ session.target_domain }}';
+  document.getElementById('scope-profile').textContent = '{{ session.profile }}';
+</script>
+{% endblock %}

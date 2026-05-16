@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}Live Scan — Wisper Alpha v2{% endblock %}
+{% block content %}
+
+<header class="ws-page-hd anim-up">
+  <div>
+    <div class="ws-crumb">
+      <a href="/" style="color:var(--brand-cyan-600);cursor:pointer;">← Dashboard</a>
+      &nbsp;·&nbsp; Run console
+    </div>
+    <h1 class="ws-h1">Passive Recon Pipeline</h1>
+    <p class="ws-small ws-mono" style="margin-top:8px;">{{ session_id }}</p>
+  </div>
+  <div class="ws-hd-actions" style="display:flex; align-items:center; gap: 12px;">
+    <button id="force-stop-btn" onclick="forceStop()" class="btn" style="background:transparent; color:var(--brand-red-400); border: 1px solid var(--brand-red-400); padding: 4px 10px; font-size: 12px; height: 26px; border-radius: 4px;">Force Stop</button>
+    <div style="display:flex; align-items:center; gap: 6px;">
+      <span id="status-chip" class="chip chip-cyan"><span class="chip-dot"></span> Running</span>
+      <span id="elapsed" class="ws-mono ws-muted" style="font-size:12px;"></span>
+    </div>
+  </div>
+</header>
+<style>
+.spin-anim { animation: spin 1.2s linear infinite; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+</style>
+
+<!-- Pipeline stages -->
+<div class="ws-stages anim-up">
+  {% set stage_defs = [
+    ('subfinder',        'Subdomain Discovery', ['subfinder','amass']),
+    ('dns',              'DNS Enrichment',       ['dig','dnsrecon']),
+    ('crtsh',            'Certificate Scan',     ['crt.sh']),
+    ('historical_urls',  'Historical URLs',      ['wayback','gau']),
+    ('httpx',            'HTTP Probing',         ['httpx','dnsx']),
+    ('nuclei',           'Vuln Scan',            ['nuclei']),
+  ] %}
+  {% for key, label, tools in stage_defs %}
+  <div class="ws-stage" id="stage-{{ key }}">
+    <div class="ws-stage-dot" id="dot-{{ key }}">
+      <span style="font:700 11px var(--font-mono);color:var(--slate-500);">{{ loop.index }}</span>
+    </div>
+    <div class="ws-stage-name">{{ label }}</div>
+    <div class="ws-stage-tools">
+      {% for t in tools %}
+      <span class="chip chip-neutral" style="font-family:var(--font-mono);text-transform:none;letter-spacing:0;font-size:11px;font-weight:500;">{{ t }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Live log console -->
+<section class="ws-console-wrap anim-up" style="animation-delay:.15s;">
+  <div class="ws-console-hd">
+    <span class="ws-console-hd-lbl">Adapter log · <span id="line-count">0</span> lines</span>
+    <div style="display:flex; gap: 16px; align-items:center;">
+      <div id="loader-bar" style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--brand-cyan-400);">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin-anim"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        <span id="loader-text">Initializing recon modules...</span>
+      </div>
+      <span class="ws-mono" style="color:var(--brand-cyan-400);font-size:12px;" id="elapsed2"></span>
+    </div>
+  </div>
+  <div class="ws-console" id="log">
+    <span style="color:var(--fg4);">Waiting for adapter output…</span>
+  </div>
+</section>
+
+<!-- Done panel (hidden until complete) -->
+<div id="done-panel" style="display:none;margin-top:20px;" class="ws-panel">
+  <p style="color:var(--brand-green-400);font-weight:600;margin-bottom:16px;">✓ Scan complete — all reports generated.</p>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;">
+    <a class="btn btn-accent" href="/session/{{ session_id }}">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      View Findings
+    </a>
+    <a class="btn btn-ghost" href="/session/{{ session_id }}/reports">Reports</a>
+    <a class="btn btn-ghost" href="/">Dashboard</a>
+  </div>
+</div>
+
+<script>
+  const sessionId = "{{ session_id }}";
+  const logEl     = document.getElementById('log');
+  const statusChip = document.getElementById('status-chip');
+  const elapsedEl = document.getElementById('elapsed');
+  const elapsed2  = document.getElementById('elapsed2');
+  const donePanel = document.getElementById('done-panel');
+  const lineCount = document.getElementById('line-count');
+  const start     = Date.now();
+  let seenLines   = 0;
+  let firstOutput = true;
+
+  // Stage keyword detection
+  const STAGE_MAP = {
+    'subfinder': 'subfinder', 'amass': 'subfinder',
+    'dns': 'dns', 'dnsrecon': 'dns', 'dig': 'dns',
+    'crt.sh': 'crtsh', 'crtsh': 'crtsh', 'certificate': 'crtsh',
+    'wayback': 'historical_urls', 'gau': 'historical_urls', 'historical': 'historical_urls',
+    'httpx': 'httpx', 'dnsx': 'httpx',
+    'nuclei': 'nuclei',
+  };
+  const activatedStages = new Set();
+
+  function fmtElapsed() {
+    const s = Math.floor((Date.now() - start) / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`;
+  }
+
+  function colorLine(l) {
+    const esc = l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (esc.includes('[+]') || esc.includes('✓') || esc.toLowerCase().includes('done') || esc.includes('[OK]'))
+      return `<span class="ws-console-msg ok">${esc}</span>`;
+    if (esc.includes('[!]') || esc.includes('ERROR') || esc.toLowerCase().includes('error') || esc.includes('[✗]'))
+      return `<span class="ws-console-msg err">${esc}</span>`;
+    if (esc.includes('[*]') || esc.includes('INFO') || esc.includes('▶') || esc.includes('[~]'))
+      return `<span class="ws-console-msg info">${esc}</span>`;
+    return `<span class="ws-console-msg">${esc}</span>`;
+  }
+
+  function activateStage(line) {
+    const lower = line.toLowerCase();
+    for (const [kw, stageKey] of Object.entries(STAGE_MAP)) {
+      if (lower.includes(kw) && !activatedStages.has(stageKey)) {
+        activatedStages.add(stageKey);
+        const el = document.getElementById('stage-' + stageKey);
+        const dot = document.getElementById('dot-' + stageKey);
+        if (el && dot) {
+          el.classList.add('current');
+          dot.innerHTML = '<span class="ws-stage-pulse"></span>';
+        }
+      }
+    }
+  }
+
+  function markStageDone(stageKey) {
+    const el = document.getElementById('stage-' + stageKey);
+    const dot = document.getElementById('dot-' + stageKey);
+    if (el && dot) {
+      el.classList.remove('current');
+      el.classList.add('done');
+      dot.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    }
+  }
+
+  async function forceStop() {
+    if(!confirm("Are you sure you want to kill this scan?")) return;
+    document.getElementById('force-stop-btn').disabled = true;
+    document.getElementById('force-stop-btn').textContent = "Stopping...";
+    try {
+      await fetch(`/api/scan/${sessionId}/kill`, { method: 'POST' });
+    } catch(e) {}
+  }
+
+  async function poll() {
+    try {
+      const res  = await fetch(`/api/scan/${sessionId}/status`);
+      const data = await res.json();
+      const newLines = data.log.slice(seenLines);
+
+      if (firstOutput && newLines.length > 0) {
+        logEl.innerHTML = '';
+        firstOutput = false;
+      }
+
+      newLines.forEach(l => {
+        activateStage(l);
+        const ts = new Date().toTimeString().slice(0, 8);
+        logEl.innerHTML += `<div class="ws-console-row"><span class="ws-console-t">${ts}</span>${colorLine(l)}</div>`;
+        
+        // Update loading animation text based on current task
+        const cleanTxt = l.replace(/\x1b\[[0-9;]*m/g, '').replace(/\[\+\]|\[!\]|\[\*\]|✓/g, '').trim();
+        if (cleanTxt && (cleanTxt.toLowerCase().includes('running') || cleanTxt.toLowerCase().includes('discovering') || cleanTxt.toLowerCase().includes('probing') || cleanTxt.toLowerCase().includes('scanning') || cleanTxt.toLowerCase().includes('step '))) {
+           document.getElementById('loader-text').textContent = cleanTxt + "...";
+        }
+        
+        seenLines++;
+      });
+
+      lineCount.textContent = seenLines;
+      if (newLines.length > 0) {
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      const elapsed = fmtElapsed();
+      elapsedEl.textContent = `elapsed ${elapsed}`;
+      elapsed2.textContent = `elapsed ${elapsed}`;
+
+      if (data.status === 'done' || data.status === 'error' || data.status === 'killed') {
+        document.getElementById('loader-bar').style.display = 'none';
+        document.getElementById('force-stop-btn').style.display = 'none';
+        
+        if (data.status === 'done') {
+          statusChip.className = 'chip chip-success';
+          statusChip.innerHTML = '<span class="chip-dot"></span> Done';
+          activatedStages.forEach(s => markStageDone(s));
+          donePanel.style.display = '';
+          elapsed2.textContent = `completed in ${elapsed}`;
+        } else if (data.status === 'killed') {
+          statusChip.className = 'chip chip-danger';
+          statusChip.innerHTML = '<span class="chip-dot"></span> Killed';
+          donePanel.style.display = '';
+        } else {
+          statusChip.className = 'chip chip-danger';
+          statusChip.innerHTML = '<span class="chip-dot"></span> Error';
+          donePanel.style.display = '';
+        }
+        return;
+      }
+    } catch(e) { /* network hiccup — keep polling */ }
+    setTimeout(poll, 1500);
+  }
+
+  poll();
+</script>
+{% endblock %}
