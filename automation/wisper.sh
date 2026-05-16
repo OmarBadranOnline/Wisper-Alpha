@@ -1948,8 +1948,8 @@ main() {
 
     # Step 4 — run chosen profile
     case "${PROFILE}" in
-        "core-passive")          run_core     ;;
-        "advanced-deep-passive") run_advanced ;;
+        "core-passive")          run_core </dev/null     ;;
+        "advanced-deep-passive") run_advanced </dev/null ;;
     esac
 
     review_dashboard   # Step 5

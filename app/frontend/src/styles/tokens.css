@@ -1,0 +1,190 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Wisper Alpha — Design Tokens
+   Font: IBM Plex Mono (code) + Google Inter (UI)
+═══════════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  src: url('/fonts/IBMPlexSansArabic-Thin.ttf') format('truetype');
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  src: url('/fonts/IBMPlexSansArabic-ExtraLight.ttf') format('truetype');
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  src: url('/fonts/IBMPlexSansArabic-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  src: url('/fonts/IBMPlexSansArabic-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  src: url('/fonts/IBMPlexSansArabic-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  src: url('/fonts/IBMPlexSansArabic-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  src: url('/fonts/IBMPlexSansArabic-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Brand palette */
+  --brand-navy-900: #0A1C33;
+  --brand-navy-800: #0E2542;
+  --brand-navy-700: #13324F;
+  --brand-navy-600: #1B3A5C;
+  --brand-navy-500: #2A5079;
+  --brand-navy-400: #4A7BA8;
+
+  --brand-cyan-700: #1E5A82;
+  --brand-cyan-600: #2A6F9E;
+  --brand-cyan-500: #4AAFD9;
+  --brand-cyan-400: #7FD3EB;
+  --brand-cyan-300: #B8E6F3;
+  --brand-cyan-200: #DCF0F7;
+
+  --brand-green-600: #1A6B4A;
+  --brand-green-500: #23A878;
+  --brand-green-400: #4FC493;
+
+  /* Slate scale */
+  --slate-950: #07111F;
+  --slate-900: #0F1B2D;
+  --slate-800: #1A2A42;
+  --slate-700: #2C4058;
+  --slate-600: #45597A;
+  --slate-500: #6B7F9C;
+  --slate-400: #9AABC2;
+  --slate-300: #C4D0E0;
+  --slate-200: #E1E7F0;
+  --slate-100: #F0F3F8;
+  --slate-50: #F7F9FC;
+  --white: #FFFFFF;
+
+  /* Semantic severity */
+  --sev-critical: #C0283D;
+  --sev-high: #E05A2B;
+  --sev-medium: #D9A038;
+  --sev-low: #4AAFD9;
+  --sev-info: #6B7F9C;
+
+  --confidence-high: #2E8B6B;
+  --confidence-medium: #D9A038;
+  --confidence-low: #C0283D;
+
+  --state-success: #2E8B6B;
+  --state-warning: #D9A038;
+  --state-danger: #C0283D;
+  --state-info: #2A6F9E;
+
+  /* Surface tokens — dark theme */
+  --bg-app: #0B1929;
+  --bg-surface: #0F2138;
+  --bg-card: #132A46;
+  --bg-elevated: #183354;
+  --bg-glass: rgba(19, 42, 70, 0.72);
+  --bg-inverse: #F0F3F8;
+
+  --fg1: #E8EFF8;
+  --fg2: #B2C4D8;
+  --fg3: #6B8099;
+  --fg4: #3D5270;
+  --fg-inverse: #0F1B2D;
+  --fg-brand: #7FD3EB;
+  --fg-accent: #4AAFD9;
+
+  --border-subtle: rgba(127, 211, 235, 0.08);
+  --border-default: rgba(127, 211, 235, 0.14);
+  --border-strong: rgba(127, 211, 235, 0.24);
+  --border-brand: rgba(74, 175, 217, 0.4);
+  --border-glow: rgba(74, 175, 217, 0.6);
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Radius */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-pill: 999px;
+
+  /* Shadows — dark-aware */
+  --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-brand: 0 0 20px rgba(74, 175, 217, 0.25), 0 4px 16px rgba(74, 175, 217, 0.15);
+  --shadow-glow: 0 0 30px rgba(74, 175, 217, 0.35);
+  --shadow-danger: 0 4px 16px rgba(192, 40, 61, 0.35);
+
+  /* Fonts */
+  --font-sans: 'Inter', 'IBM Plex Sans Arabic', 'Helvetica Neue', Arial, sans-serif;
+  --font-text: 'Inter', 'IBM Plex Sans Arabic', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Type scale */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
+  --fs-3xl: 36px;
+  --fs-4xl: 48px;
+
+  --lh-tight: 1.15;
+  --lh-snug: 1.3;
+  --lh-normal: 1.5;
+  --tracking-tight: -0.02em;
+  --tracking-wide: 0.04em;
+  --tracking-caps: 0.12em;
+
+  /* Animation easing */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}

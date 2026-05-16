@@ -32,11 +32,7 @@
 sessions/
 automation/sessions/
 
-# Archived GUI draft zip
-app_gui_draft.zip
-
-# Archived web GUI (FastAPI + React) — project is now terminal-only
-app/
+wisper-v2/
 
 # Legacy scripts no longer needed for terminal-only flow
 run-unit-tests.sh

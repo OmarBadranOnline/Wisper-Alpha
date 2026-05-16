@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Wisper Alpha{% endblock %}
+{% block content %}
+
+<header class="ws-page-hd anim-up">
+  <div>
+    <div class="ws-crumb">Workspace</div>
+    <h1 class="ws-h1">Dashboard</h1>
+  </div>
+  <div class="ws-hd-actions">
+    <a href="/scan" class="btn btn-accent">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      New Scan
+    </a>
+  </div>
+</header>
+
+{% if not sessions %}
+<div class="ws-panel anim-up" style="text-align:center;padding:60px 40px;">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--fg4)" stroke-width="1.5" style="margin:0 auto 16px;display:block;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+  <p class="ws-body" style="margin-bottom:24px;">No reconnaissance sessions yet.</p>
+  <a href="/scan" class="btn btn-accent">Start your first scan</a>
+</div>
+
+{% else %}
+
+<!-- Stats -->
+<div class="ws-stats anim-up">
+  <div class="ws-stat">
+    <div class="ws-stat-lbl">Sessions</div>
+    <div class="ws-stat-num accent">{{ sessions|length }}</div>
+  </div>
+  <div class="ws-stat">
+    <div class="ws-stat-lbl">Completed</div>
+    <div class="ws-stat-num">
+      {% set ns = namespace(n=0) %}
+      {% for s in sessions %}{% if s.status in ['done','completed'] %}{% set ns.n = ns.n + 1 %}{% endif %}{% endfor %}
+      {{ ns.n }}
+    </div>
+  </div>
+  <div class="ws-stat">
+    <div class="ws-stat-lbl">Subdomains</div>
+    <div class="ws-stat-num accent">
+      {% set ns2 = namespace(n=0) %}
+      {% for c in counts.values() %}{% set ns2.n = ns2.n + c.get('Subdomains', 0) %}{% endfor %}
+      {{ ns2.n }}
+    </div>
+  </div>
+  <div class="ws-stat">
+    <div class="ws-stat-lbl">Historical URLs</div>
+    <div class="ws-stat-num">
+      {% set ns3 = namespace(n=0) %}
+      {% for c in counts.values() %}{% set ns3.n = ns3.n + c.get('Historical URLs', 0) %}{% endfor %}
+      {{ ns3.n }}
+    </div>
+  </div>
+</div>
+
+<!-- Sessions table -->
+<div class="ws-panel anim-up" style="padding:0;overflow:hidden;">
+  <div style="padding:20px 24px 16px;border-bottom:1px solid var(--border-default);">
+    <h3 class="ws-h4">Reconnaissance Sessions</h3>
+    <p class="ws-small" style="margin-top:4px;">Read from <code class="inline">sessions/</code> — most recent first.</p>
+  </div>
+  <table class="ws-tbl">
+    <thead>
+      <tr>
+        <th>Session ID</th><th>Target</th><th>Profile</th><th>Status</th>
+        <th>Subdomains</th><th>URLs</th><th>Started</th><th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in sessions %}
+    {% set c = counts.get(s.id, {}) %}
+    <tr>
+      <td><span class="ws-mono" style="font-size:.75rem;color:var(--fg3);">{{ s.id }}</span></td>
+      <td>
+        <a href="/session/{{ s.id }}" style="color:var(--brand-cyan-400);font-family:var(--font-mono);font-size:.85rem;">{{ s.target_domain }}</a>
+      </td>
+      <td><span class="chip chip-neutral" style="font-size:.7rem;">{{ s.profile or 'core-passive' }}</span></td>
+      <td>
+        {% if s.status in ['done','completed'] %}<span class="chip chip-success"><span class="chip-dot"></span>done</span>
+        {% elif s.status == 'running' %}<span class="chip chip-cyan"><span class="chip-dot"></span>running</span>
+        {% elif s.status == 'error' %}<span class="chip chip-danger"><span class="chip-dot"></span>error</span>
+        {% else %}<span class="chip chip-neutral"><span class="chip-dot"></span>{{ s.status }}</span>{% endif %}
+      </td>
+      <td class="ws-muted">{{ c.get('Subdomains', '—') }}</td>
+      <td class="ws-muted">{{ c.get('Historical URLs', '—') }}</td>
+      <td class="ws-muted ws-mono" style="font-size:.75rem;">{{ (s.started_at or '')[:16] }}</td>
+      <td>
+        <div style="display:flex;gap:4px;">
+          <a href="/session/{{ s.id }}" class="btn btn-ghost" style="padding:6px 12px;font-size:.78rem;">Detail</a>
+          <button onclick="deleteSession('{{ s.id }}')" class="btn btn-ghost" style="padding:6px 12px;font-size:.78rem;color:var(--brand-danger-400);">Delete</button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script>
+async function deleteSession(sessionId) {
+  if (!confirm('Are you sure you want to delete session ' + sessionId + '?')) return;
+  try {
+    const res = await fetch('/api/scan/' + sessionId, { method: 'DELETE' });
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      alert('Failed to delete session');
+    }
+  } catch (e) {
+    alert('Error deleting session');
+  }
+}
+
+{% if sessions %}
+document.getElementById('scope-target').textContent = '{{ sessions[0].target_domain }}';
+document.getElementById('scope-profile').textContent = '{{ sessions[0].profile or "core-passive" }}';
+{% endif %}
+</script>
+{% endblock %}
